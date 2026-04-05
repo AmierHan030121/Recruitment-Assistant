@@ -22,11 +22,26 @@ SEARCH_KEYWORD = "数据分析"
 MIN_DELAY = 3
 MAX_DELAY = 8
 
-# 每个平台最大抓取页数
-MAX_PAGES = 10
-
 # Playwright 超时时间（毫秒）
 PAGE_TIMEOUT = 60000
+
+# ==================== 目标城市列表 ====================
+# 按省份分组，每个城市抓取第 1 页
+TARGET_CITIES = [
+    # 浙江省（11 个地级市）
+    "杭州", "宁波", "温州", "嘉兴", "湖州", "绍兴",
+    "金华", "衢州", "舟山", "台州", "丽水",
+    # 江苏省（13 个地级市）
+    "南京", "无锡", "徐州", "常州", "苏州", "南通",
+    "连云港", "淮安", "盐城", "扬州", "镇江", "泰州", "宿迁",
+    # 广东省（21 个地级市）
+    "广州", "深圳", "珠海", "汕头", "佛山", "韶关",
+    "湛江", "肇庆", "江门", "茂名", "惠州", "梅州",
+    "汕尾", "河源", "阳江", "清远", "东莞", "中山",
+    "潮州", "揭阳", "云浮",
+    # 直辖市
+    "北京", "上海",
+]
 
 # ==================== 数据清洗：技术工具关键词 ====================
 TECH_TOOLS = [
@@ -57,6 +72,5 @@ BUSINESS_KEYWORDS = [
 # ==================== 平台 URL 模板 ====================
 PLATFORM_URLS = {
     "nowcoder": "https://www.nowcoder.com/search?type=job&searchType=&query={keyword}",
-    "shixiseng": "https://www.shixiseng.com/interns?keyword={keyword}&type=intern",
-    "zhilian": "https://sou.zhaopin.com/?jl=530&kw={keyword}&p={page}",
+    "zhilian": "https://sou.zhaopin.com/?jl={city}&kw={keyword}&p=1",
 }

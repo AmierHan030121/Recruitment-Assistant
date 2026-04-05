@@ -3,7 +3,7 @@
 
 执行方式：
     python main.py              # 运行所有平台
-    python main.py --platform boss  # 仅运行 BOSS 直聘
+    python main.py --platform nowcoder  # 仅运行牛客网
     python main.py --dry-run    # 仅爬取和清洗，不写入飞书
 """
 
@@ -18,7 +18,6 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from scrapers.nowcoder import scrape_nowcoder
-from scrapers.shixiseng import scrape_shixiseng
 from scrapers.zhilian import scrape_zhilian
 from cleaner import clean_data
 from feishu import sync_to_feishu
@@ -34,7 +33,6 @@ logger = logging.getLogger("main")
 # 平台名称到爬虫函数的映射
 SCRAPERS = {
     "nowcoder": ("牛客网", scrape_nowcoder),
-    "shixiseng": ("实习僧", scrape_shixiseng),
     "zhilian": ("智联招聘", scrape_zhilian),
 }
 
