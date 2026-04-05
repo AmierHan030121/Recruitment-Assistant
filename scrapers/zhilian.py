@@ -1,8 +1,10 @@
 """
 智联招聘爬虫模块。
-策略：按「城市 × 职位类型」逐一搜索，每个组合仅抓取第 1 页。
+策略：按「城市 × 职位类型」逐一搜索。
+- 北京/上海：每个组合抓取最多 5 页
+- 其余城市：每个组合仅抓取第 1 页
 城市通过 URL 参数 jl={城市名} 指定。
-职位类型通过页面「职位类型」筛选下拉框逐个选择（全职 / 兼职 / 实习）。
+职位类型通过页面「职位类型」筛选下拉框逐个选择（全职 / 兼职/临时 / 实习 / 校园）。
 逐条访问详情页获取完整岗位描述。
 """
 
@@ -15,6 +17,7 @@ from playwright.async_api import async_playwright
 from config import (
     SEARCH_KEYWORD, TARGET_CITIES, ZHILIAN_JOB_TYPES,
     MIN_DELAY, MAX_DELAY,
+    ZHILIAN_MULTI_PAGE_CITIES, ZHILIAN_MAX_PAGES,
 )
 from utils import random_delay
 
@@ -125,7 +128,9 @@ async def _clear_filters(page):
 
 
 async def scrape_zhilian() -> List[Dict]:
-    """按「城市 × 职位类型」逐一抓取智联招聘的数据分析岗位。"""
+    """按「城市 × 职位类型」逐一抓取智联招聘的数据分析岗位。
+    北京/上海抓取最多 ZHILIAN_MAX_PAGES 页，其余城市仅第 1 页。
+    """
     results: List[Dict] = []
     kw_encoded = urllib.parse.quote(SEARCH_KEYWORD)
 
@@ -168,127 +173,140 @@ async def scrape_zhilian() -> List[Dict]:
 
             for city in TARGET_CITIES:
                 city_encoded = urllib.parse.quote(city)
-                base_url = (
-                    f"https://sou.zhaopin.com/?"
-                    f"jl={city_encoded}&kw={kw_encoded}&p=1"
+                max_pages = (
+                    ZHILIAN_MAX_PAGES
+                    if city in ZHILIAN_MULTI_PAGE_CITIES
+                    else 1
                 )
 
                 for job_type in ZHILIAN_JOB_TYPES:
-                    logger.info(
-                        f"[智联招聘] 正在抓取 [{city}] [{job_type}] ..."
-                    )
-
-                    # 每次组合重新加载页面（确保筛选状态干净）
-                    await list_page.goto(
-                        base_url,
-                        wait_until="domcontentloaded", timeout=30000,
-                    )
-                    await asyncio.sleep(2)
-
-                    # 尝试选择职位类型
-                    filter_ok = await _click_job_type_filter(list_page, job_type)
-                    if not filter_ok:
-                        logger.debug(
-                            f"[智联招聘] [{city}] 职位类型[{job_type}]筛选跳过"
+                    for page_num in range(1, max_pages + 1):
+                        page_url = (
+                            f"https://sou.zhaopin.com/?"
+                            f"jl={city_encoded}&kw={kw_encoded}&p={page_num}"
                         )
-
-                    # 等待卡片
-                    try:
-                        await list_page.wait_for_selector(
-                            ".joblist-box__item", timeout=15000,
-                        )
-                    except Exception:
                         logger.info(
-                            f"[智联招聘] [{city}] [{job_type}] 无职位卡片，跳过"
+                            f"[智联招聘] [{city}] [{job_type}] "
+                            f"第 {page_num}/{max_pages} 页..."
                         )
-                        await random_delay(1, 2)
-                        continue
 
-                    cards = await list_page.query_selector_all(
-                        ".joblist-box__item"
-                    )
-                    if not cards:
-                        logger.info(
-                            f"[智联招聘] [{city}] [{job_type}] 无结果"
+                        # 每次重新加载页面（确保筛选状态干净）
+                        await list_page.goto(
+                            page_url,
+                            wait_until="domcontentloaded", timeout=30000,
                         )
-                        await random_delay(1, 2)
-                        continue
+                        await asyncio.sleep(2)
 
-                    for i, card in enumerate(cards):
-                        try:
-                            name_el = await card.query_selector(
-                                "a.jobinfo__name"
-                            )
-                            job_name = (
-                                (await name_el.inner_text()).strip()
-                                if name_el else ""
-                            )
-                            detail_href = (
-                                (await name_el.get_attribute("href"))
-                                if name_el else ""
-                            )
-
-                            salary_el = await card.query_selector(
-                                "p.jobinfo__salary"
-                            )
-                            salary = (
-                                (await salary_el.inner_text()).strip()
-                                if salary_el else "面议"
-                            )
-
-                            comp_el = await card.query_selector(
-                                "a.companyinfo__name"
-                            )
-                            company = (
-                                (await comp_el.inner_text()).strip()
-                                if comp_el else ""
-                            )
-
-                            city_el = await card.query_selector(
-                                ".jobinfo__other-info-item span"
-                            )
-                            job_city = (
-                                (await city_el.inner_text()).strip()
-                                if city_el else city
-                            )
-
-                            jd = ""
-                            if detail_href:
-                                detail_url = (
-                                    detail_href
-                                    if detail_href.startswith("http")
-                                    else f"https:{detail_href}"
-                                )
-                                logger.info(
-                                    f"[智联招聘] [{city}] [{job_type}] "
-                                    f"第 {i + 1}/{len(cards)} 条详情..."
-                                )
-                                jd = await _fetch_jd_zhilian(
-                                    detail_page, detail_url,
-                                )
-                                await random_delay(1, 3)
-
-                            if job_name:
-                                results.append({
-                                    "岗位名称": job_name,
-                                    "公司名称": company,
-                                    "薪资": salary,
-                                    "工作地点": job_city,
-                                    "岗位描述": jd,
-                                    "岗位类型": job_type,
-                                    "来源平台": "智联招聘",
-                                })
-                        except Exception as e:
+                        # 尝试选择职位类型
+                        filter_ok = await _click_job_type_filter(
+                            list_page, job_type,
+                        )
+                        if not filter_ok:
                             logger.debug(
-                                f"[智联招聘] 解析单条岗位失败: {e}"
+                                f"[智联招聘] [{city}] "
+                                f"职位类型[{job_type}]筛选跳过"
                             )
-                            continue
 
-                    logger.info(
-                        f"[智联招聘] [{city}] [{job_type}] "
-                        f"解析 {len(cards)} 条"
-                    )
-                    await random_delay(MIN_DELAY, MAX_DELAY)
+                        # 等待卡片
+                        try:
+                            await list_page.wait_for_selector(
+                                ".joblist-box__item", timeout=15000,
+                            )
+                        except Exception:
+                            logger.info(
+                                f"[智联招聘] [{city}] [{job_type}] "
+                                f"第 {page_num} 页无职位卡片，停止翻页"
+                            )
+                            await random_delay(1, 2)
+                            break  # 无结果则停止该类型的后续页
+
+                        cards = await list_page.query_selector_all(
+                            ".joblist-box__item"
+                        )
+                        if not cards:
+                            logger.info(
+                                f"[智联招聘] [{city}] [{job_type}] "
+                                f"第 {page_num} 页无结果，停止翻页"
+                            )
+                            await random_delay(1, 2)
+                            break
+
+                        for i, card in enumerate(cards):
+                            try:
+                                name_el = await card.query_selector(
+                                    "a.jobinfo__name"
+                                )
+                                job_name = (
+                                    (await name_el.inner_text()).strip()
+                                    if name_el else ""
+                                )
+                                detail_href = (
+                                    (await name_el.get_attribute("href"))
+                                    if name_el else ""
+                                )
+
+                                salary_el = await card.query_selector(
+                                    "p.jobinfo__salary"
+                                )
+                                salary = (
+                                    (await salary_el.inner_text()).strip()
+                                    if salary_el else "面议"
+                                )
+
+                                comp_el = await card.query_selector(
+                                    "a.companyinfo__name"
+                                )
+                                company = (
+                                    (await comp_el.inner_text()).strip()
+                                    if comp_el else ""
+                                )
+
+                                city_el = await card.query_selector(
+                                    ".jobinfo__other-info-item span"
+                                )
+                                job_city = (
+                                    (await city_el.inner_text()).strip()
+                                    if city_el else city
+                                )
+
+                                jd = ""
+                                if detail_href:
+                                    detail_url = (
+                                        detail_href
+                                        if detail_href.startswith("http")
+                                        else f"https:{detail_href}"
+                                    )
+                                    logger.info(
+                                        f"[智联招聘] [{city}] [{job_type}] "
+                                        f"p{page_num} 第 {i + 1}/{len(cards)} "
+                                        f"条详情..."
+                                    )
+                                    jd = await _fetch_jd_zhilian(
+                                        detail_page, detail_url,
+                                    )
+                                    await random_delay(1, 3)
+
+                                if job_name:
+                                    results.append({
+                                        "岗位名称": job_name,
+                                        "公司名称": company,
+                                        "薪资": salary,
+                                        "工作地点": job_city,
+                                        "岗位描述": jd,
+                                        "岗位类型": job_type,
+                                        "来源平台": "智联招聘",
+                                    })
+                            except Exception as e:
+                                logger.debug(
+                                    f"[智联招聘] 解析单条岗位失败: {e}"
+                                )
+                                continue
+
+                        logger.info(
+                            f"[智联招聘] [{city}] [{job_type}] "
+                            f"p{page_num} 解析 {len(cards)} 条"
+                        )
+                        await random_delay(MIN_DELAY, MAX_DELAY)
 
             await browser.close()
 

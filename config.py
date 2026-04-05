@@ -6,10 +6,10 @@
 import os
 
 # ==================== 飞书开放平台配置 ====================
-FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "")
-FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "")
-FEISHU_APP_TOKEN = os.getenv("FEISHU_APP_TOKEN", "")  # 多维表格 app_token
-FEISHU_TABLE_ID = os.getenv("FEISHU_TABLE_ID", "")    # 多维表格中的数据表 ID
+FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "cli_a958b47358785bd6")
+FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "S60WUzh6FsMrSF5gyyaPQgkaBNwDNHMQ")
+FEISHU_APP_TOKEN = os.getenv("FEISHU_APP_TOKEN", "GXOvwcD08imZ1lkroOec6P9knlg")  # 多维表格 app_token
+FEISHU_TABLE_ID = os.getenv("FEISHU_TABLE_ID", "tbl2zCRWvAo5WEPN")    # 多维表格中的数据表 ID
 
 # 飞书 API 基础地址
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
@@ -32,16 +32,8 @@ PROVINCE_CITIES = {
         "杭州", "宁波", "温州", "嘉兴", "湖州", "绍兴",
         "金华", "衢州", "舟山", "台州", "丽水",
     ],
-    "江苏省": [
-        "南京", "无锡", "徐州", "常州", "苏州", "南通",
-        "连云港", "淮安", "盐城", "扬州", "镇江", "泰州", "宿迁",
-    ],
-    "广东省": [
-        "广州", "深圳", "珠海", "汕头", "佛山", "韶关",
-        "湛江", "肇庆", "江门", "茂名", "惠州", "梅州",
-        "汕尾", "河源", "阳江", "清远", "东莞", "中山",
-        "潮州", "揭阳", "云浮",
-    ],
+    "江苏省": ["南京", "苏州", "扬州"],
+    "广东省": ["广州", "深圳", "珠海"],
     # 直辖市：在牛客城市级联器中以 "北京"/"上海" 显示（非 "北京市"）
     "北京": ["北京"],
     "上海": ["上海"],
@@ -50,11 +42,29 @@ PROVINCE_CITIES = {
 # 扁平化城市列表（用于智联招聘 URL 参数）
 TARGET_CITIES = [city for cities in PROVINCE_CITIES.values() for city in cities]
 
+# 城市 → 工作地点映射（清洗时使用）
+CITY_PROVINCE_MAP = {}
+for _prov, _cities in PROVINCE_CITIES.items():
+    for _c in _cities:
+        if _prov == "浙江省":
+            CITY_PROVINCE_MAP[_c] = "浙江"
+        elif _prov == "江苏省":
+            CITY_PROVINCE_MAP[_c] = "江苏"
+        elif _prov == "广东省":
+            CITY_PROVINCE_MAP[_c] = "广东"
+        else:
+            CITY_PROVINCE_MAP[_c] = _c  # 北京、上海保持原样
+
 # ==================== 牛客网职位类型 ====================
 NOWCODER_JOB_TYPES = ["实习", "校招", "社招"]
 
 # ==================== 智联招聘职位类型 ====================
-ZHILIAN_JOB_TYPES = ["全职", "兼职", "实习"]
+ZHILIAN_JOB_TYPES = ["全职", "兼职/临时", "实习", "校园"]
+
+# ==================== 智联招聘多页抓取城市 ====================
+# 北京/上海在智联招聘上抓取最多 5 页，其余城市仅抓取第 1 页
+ZHILIAN_MULTI_PAGE_CITIES = {"北京", "上海"}
+ZHILIAN_MAX_PAGES = 5
 
 # ==================== 数据清洗：技术工具关键词 ====================
 TECH_TOOLS = [
