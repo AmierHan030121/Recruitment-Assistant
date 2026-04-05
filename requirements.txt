@@ -1,0 +1,7 @@
+# Python 依赖列表
+# 使用方式: pip install -r requirements.txt
+
+playwright>=1.40.0
+pandas>=2.0.0
+requests>=2.31.0
+fake-useragent>=1.4.0
