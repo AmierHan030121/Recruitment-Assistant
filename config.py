@@ -43,17 +43,19 @@ PROVINCE_CITIES = {
 TARGET_CITIES = [city for cities in PROVINCE_CITIES.values() for city in cities]
 
 # 城市 → 工作地点映射（清洗时使用）
-CITY_PROVINCE_MAP = {}
-for _prov, _cities in PROVINCE_CITIES.items():
-    for _c in _cities:
-        if _prov == "浙江省":
-            CITY_PROVINCE_MAP[_c] = "浙江"
-        elif _prov == "江苏省":
-            CITY_PROVINCE_MAP[_c] = "江苏"
-        elif _prov == "广东省":
-            CITY_PROVINCE_MAP[_c] = "广东"
-        else:
-            CITY_PROVINCE_MAP[_c] = _c  # 北京、上海保持原样
+# 覆盖全部 18 个城市（测试模式下也保持完整映射，避免清洗出错）
+CITY_PROVINCE_MAP = {
+    # 浙江
+    "杭州": "浙江", "宁波": "浙江", "温州": "浙江", "嘉兴": "浙江",
+    "湖州": "浙江", "绍兴": "浙江", "金华": "浙江", "衢州": "浙江",
+    "舟山": "浙江", "台州": "浙江", "丽水": "浙江",
+    # 江苏
+    "南京": "江苏", "苏州": "江苏", "扬州": "江苏",
+    # 广东
+    "广州": "广东", "深圳": "广东", "珠海": "广东",
+    # 直辖市
+    "北京": "北京", "上海": "上海",
+}
 
 # ==================== 牛客网职位类型 ====================
 NOWCODER_JOB_TYPES = ["实习", "校招", "社招"]
