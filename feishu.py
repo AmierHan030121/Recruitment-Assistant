@@ -132,17 +132,15 @@ class FeishuBitable:
 
         new_records = []
         for _, row in df.iterrows():
-            unique_key = row.get("unique_key", "")
-            if unique_key in existing_keys:
+            key = f"{str(row.get('公司名称', '')).strip()}_{str(row.get('岗位名称', '')).strip()}"
+            if key in existing_keys:
                 continue
 
             record = {
                 "fields": {
                     "公司名称": str(row.get("公司名称", "")),
                     "岗位名称": str(row.get("岗位名称", "")),
-                    "薪资原始": str(row.get("薪资原始", "")),
-                    "薪资下限": str(row.get("薪资下限", "")),
-                    "薪资上限": str(row.get("薪资上限", "")),
+                    "薪资": str(row.get("薪资", "")),
                     "工作地点": str(row.get("工作地点", "")),
                     "岗位描述": str(row.get("岗位描述", "")),
                     "岗位类型": str(row.get("岗位类型", "")),

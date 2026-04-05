@@ -17,6 +17,7 @@
 
 import asyncio
 import logging
+import re
 import urllib.parse
 from typing import List, Dict
 from playwright.async_api import async_playwright
@@ -24,6 +25,14 @@ from config import SEARCH_KEYWORD, MAX_PAGES, MIN_DELAY, MAX_DELAY
 from utils import random_delay, simulate_scroll
 
 logger = logging.getLogger(__name__)
+
+# 岗位名称必须包含以下关键词之一才视为"数据分析"相关
+_RELEVANT_RE = re.compile(
+    r"数据分析|数据运营|数据挖掘|数据开发|数据产品|数据工程|BI|"
+    r"商业分析|业务分析|经营分析|数据治理|数据中台|数据仓库|"
+    r"数据科学|大数据|数据管理|数据策略|数据平台|数据研发",
+    re.IGNORECASE,
+)
 
 # 实习僧列表页固定使用手机端 UA（网站始终渲染移动端布局）
 _MOBILE_UA = (
@@ -197,6 +206,12 @@ async def scrape_shixiseng() -> List[Dict]:
                             (await name_el.inner_text()).strip() if name_el else ""
                         )
 
+                        # 提前过滤：岗位名称不相关则跳过（不再浪费时间访问详情页）
+                        if not job["岗位名称"] or not _RELEVANT_RE.search(job["岗位名称"]):
+                            if job["岗位名称"]:
+                                logger.debug(f"[实习僧] 跳过无关岗位: {job['岗位名称']}")
+                            continue
+
                         salary_el = await card.query_selector(".right .salary")
                         job["薪资"] = (
                             (await salary_el.inner_text()).strip()
@@ -235,7 +250,7 @@ async def scrape_shixiseng() -> List[Dict]:
                         job["岗位类型"] = "实习"
                         job["来源平台"] = "实习僧"
 
-                        if job["岗位名称"] and job["公司名称"]:
+                        if job["公司名称"]:
                             results.append(job)
                     except Exception as e:
                         logger.debug(f"[实习僧] 解析单条岗位失败: {e}")

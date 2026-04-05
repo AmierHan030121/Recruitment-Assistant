@@ -1,7 +1,7 @@
 """
 智联招聘爬虫模块。
-策略：Playwright 访问 sou.zhaopin.com，等待职位卡片加载后直接 CSS 选择器提取。
-无需拦截 AJAX（数据由客户端 JS 渲染至 DOM）。
+策略：Playwright 访问 sou.zhaopin.com，等待职位卡片加载后提取基本信息，
+再逐个访问详情页获取完整岗位描述。
 """
 
 import asyncio
@@ -17,10 +17,77 @@ logger = logging.getLogger(__name__)
 _CITY_CODE = "530"   # 全国不限
 
 
+async def _fetch_jd_zhilian(page, detail_url: str) -> str:
+    """访问智联招聘详情页并提取完整岗位描述。"""
+    try:
+        await page.goto(detail_url, wait_until="domcontentloaded", timeout=25000)
+
+        # 等待 JD 内容出现
+        try:
+            await page.wait_for_selector(
+                ".describtion, .describtion__detail-content, .job-description, "
+                ".pos-ul, .responsibility, [class*='describe'], [class*='detail']",
+                timeout=10000,
+            )
+        except Exception:
+            await asyncio.sleep(2)
+
+        # 依次尝试多个已知选择器
+        parts = []
+        for selector in (
+            ".describtion .describtion__detail-content",
+            ".describtion",
+            ".job-description",
+            ".pos-ul",
+            ".responsibility",
+            ".describe__content",
+            ".job-detail-content",
+        ):
+            el = await page.query_selector(selector)
+            if el:
+                text = (await el.inner_text()).strip()
+                if text and len(text) > 20:
+                    parts.append(text)
+
+        if parts:
+            return "\n".join(parts)
+
+        # JS 广泛查找
+        text = await page.evaluate(
+            """() => {
+                const sels = [
+                    '.describtion', '[class*="describe"]', '[class*="detail-content"]',
+                    '[class*="responsibility"]', '.pos-ul'
+                ];
+                const texts = [];
+                for (const s of sels) {
+                    document.querySelectorAll(s).forEach(e => {
+                        const t = e.innerText.trim();
+                        if (t.length > 20) texts.push(t);
+                    });
+                }
+                return [...new Set(texts)].join('\\n');
+            }"""
+        )
+        if text and len(text.strip()) > 20:
+            return text.strip()
+
+        # 从 body 中截取 JD 段落
+        body = await page.inner_text("body")
+        for kw in ("岗位职责", "职位描述", "工作内容", "任职要求", "职位要求"):
+            idx = body.find(kw)
+            if idx >= 0:
+                return body[idx : idx + 2000].strip()
+
+        return ""
+    except Exception as e:
+        logger.debug(f"[智联招聘] 详情页获取失败 {detail_url}: {e}")
+        return ""
+
+
 async def scrape_zhilian() -> List[Dict]:
     """
-    抓取智联招聘的数据分析岗位。
-    使用 Playwright 直接从 DOM 中提取职位卡片数据。
+    抓取智联招聘的数据分析岗位，包括详情页 JD。
     """
     results = []
     kw_encoded = urllib.parse.quote(SEARCH_KEYWORD)
@@ -40,14 +107,20 @@ async def scrape_zhilian() -> List[Dict]:
                 viewport={"width": 1920, "height": 1080},
                 locale="zh-CN",
             )
-            page = await context.new_page()
-            await page.add_init_script(
+
+            list_page = await context.new_page()
+            detail_page = await context.new_page()
+
+            await list_page.add_init_script(
+                "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
+            )
+            await detail_page.add_init_script(
                 "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
             )
 
             # 先访问主站建立 Session
             logger.info("[智联招聘] 访问主站获取 Session...")
-            await page.goto("https://www.zhaopin.com/", wait_until="domcontentloaded", timeout=30000)
+            await list_page.goto("https://www.zhaopin.com/", wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(2)
 
             for page_num in range(1, MAX_PAGES + 1):
@@ -56,25 +129,26 @@ async def scrape_zhilian() -> List[Dict]:
                     f"jl={_CITY_CODE}&kw={kw_encoded}&p={page_num}"
                 )
                 logger.info(f"[智联招聘] 正在抓取第 {page_num} 页...")
-                await page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
+                await list_page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
 
                 # 等待职位卡片渲染完毕
                 try:
-                    await page.wait_for_selector(".joblist-box__item", timeout=20000)
+                    await list_page.wait_for_selector(".joblist-box__item", timeout=20000)
                 except Exception:
                     logger.warning(f"[智联招聘] 第 {page_num} 页未找到职位卡片，停止抓取")
                     break
 
-                cards = await page.query_selector_all(".joblist-box__item")
+                cards = await list_page.query_selector_all(".joblist-box__item")
                 if not cards:
                     logger.info(f"[智联招聘] 第 {page_num} 页无数据，停止翻页")
                     break
 
-                for card in cards:
+                for i, card in enumerate(cards):
                     try:
-                        # 岗位名称
+                        # 岗位名称 + 详情页链接
                         name_el = await card.query_selector("a.jobinfo__name")
                         job_name = (await name_el.inner_text()).strip() if name_el else ""
+                        detail_href = (await name_el.get_attribute("href")) if name_el else ""
 
                         # 薪资
                         salary_el = await card.query_selector("p.jobinfo__salary")
@@ -84,17 +158,23 @@ async def scrape_zhilian() -> List[Dict]:
                         comp_el = await card.query_selector("a.companyinfo__name")
                         company = (await comp_el.inner_text()).strip() if comp_el else ""
 
-                        # 工作地点（第一个 .jobinfo__other-info-item 内的 span）
+                        # 工作地点
                         city_el = await card.query_selector(".jobinfo__other-info-item span")
                         city = (await city_el.inner_text()).strip() if city_el else ""
 
-                        # 岗位标签（作为描述信息）
-                        tag_els = await card.query_selector_all(".jobinfo__tag .joblist-box__item-tag")
-                        tags = [await t.inner_text() for t in tag_els]
-                        desc = ", ".join(tags)
+                        # 访问详情页获取完整 JD
+                        jd = ""
+                        if detail_href:
+                            detail_url = detail_href if detail_href.startswith("http") else f"https:{detail_href}"
+                            logger.info(
+                                f"[智联招聘] 第 {page_num} 页: "
+                                f"获取第 {i + 1}/{len(cards)} 条详情..."
+                            )
+                            jd = await _fetch_jd_zhilian(detail_page, detail_url)
+                            await random_delay(1, 3)
 
                         # 岗位类型
-                        full_text = job_name + " " + desc
+                        full_text = job_name + " " + jd
                         if "实习" in full_text:
                             job_type = "实习"
                         elif "兼职" in full_text:
@@ -108,7 +188,7 @@ async def scrape_zhilian() -> List[Dict]:
                                 "公司名称": company,
                                 "薪资": salary,
                                 "工作地点": city,
-                                "岗位描述": desc,
+                                "岗位描述": jd,
                                 "岗位类型": job_type,
                                 "来源平台": "智联招聘",
                             })
