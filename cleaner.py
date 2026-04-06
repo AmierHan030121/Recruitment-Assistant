@@ -9,7 +9,7 @@ import re
 import logging
 import pandas as pd
 from typing import List, Dict
-from config import TECH_TOOLS, BUSINESS_KEYWORDS, CITY_PROVINCE_MAP
+from config import TECH_TOOLS, BUSINESS_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -115,11 +115,8 @@ def clean_data(raw_jobs: List[Dict]) -> pd.DataFrame:
         if col in df.columns:
             df[col] = df[col].fillna("")
 
-    # 工作地点标准化：先提取市级，再映射到省级（浙江/江苏/广东）
+    # 工作地点标准化到市级
     df["工作地点"] = df["工作地点"].apply(normalize_city)
-    df["工作地点"] = df["工作地点"].apply(
-        lambda c: CITY_PROVINCE_MAP.get(c, c)
-    )
 
     # 提取技术工具和业务关键词
     df["技术工具"] = df["岗位描述"].apply(extract_tech_tools)

@@ -183,11 +183,92 @@ class FeishuBitable:
         logger.info(f"总共新增写入 {total_created} 条岗位数据")
         return total_created
 
+    def delete_all_records(self) -> int:
+        """
+        清空多维表格中的所有记录。
+        先分页查询全部 record_id，再分批调用批量删除 API。
+
+        文档: https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/batch_delete
+        """
+        # 1. 收集所有 record_id
+        record_ids: list = []
+        page_token = ""
+        has_more = True
+
+        while has_more:
+            url = (
+                f"{self.base_url}/bitable/v1/apps/{self.app_token}"
+                f"/tables/{self.table_id}/records"
+            )
+            params = {"page_size": 500}
+            if page_token:
+                params["page_token"] = page_token
+
+            try:
+                resp = requests.get(
+                    url, headers=self._headers(), params=params, timeout=15
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                if data.get("code") != 0:
+                    logger.error(f"查询记录失败: {data.get('msg')}")
+                    break
+
+                items = data.get("data", {}).get("items", [])
+                for item in items:
+                    rid = item.get("record_id")
+                    if rid:
+                        record_ids.append(rid)
+
+                has_more = data.get("data", {}).get("has_more", False)
+                page_token = data.get("data", {}).get("page_token", "")
+
+            except Exception as e:
+                logger.error(f"查询记录异常: {e}")
+                break
+
+        if not record_ids:
+            logger.info("飞书表格中无记录，无需清空")
+            return 0
+
+        # 2. 分批删除（每批最多 500 条）
+        total_deleted = 0
+        batch_size = 500
+        del_url = (
+            f"{self.base_url}/bitable/v1/apps/{self.app_token}"
+            f"/tables/{self.table_id}/records/batch_delete"
+        )
+
+        for i in range(0, len(record_ids), batch_size):
+            batch = record_ids[i: i + batch_size]
+            payload = {"records": batch}
+
+            try:
+                resp = requests.post(
+                    del_url, headers=self._headers(), json=payload, timeout=30
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                if data.get("code") == 0:
+                    total_deleted += len(batch)
+                    logger.info(
+                        f"删除第 {i // batch_size + 1} 批: {len(batch)} 条"
+                    )
+                else:
+                    logger.error(f"批量删除失败: {data.get('msg')}")
+            except Exception as e:
+                logger.error(f"批量删除请求异常: {e}")
+
+        logger.info(f"共清空 {total_deleted} 条旧记录")
+        return total_deleted
+
 
 def sync_to_feishu(df: pd.DataFrame) -> int:
     """
-    顶层便捷函数：认证 → 查已有数据 → 去重写入。
-    返回实际新增的记录数。
+    顶层便捷函数：认证 → 清空旧记录 → 全量写入新数据。
+    返回实际写入的记录数。
     """
     if df.empty:
         logger.warning("DataFrame 为空，跳过飞书同步")
@@ -207,8 +288,8 @@ def sync_to_feishu(df: pd.DataFrame) -> int:
     if not bitable.authenticate():
         return 0
 
-    # 2. 获取已有记录的唯一键
-    existing_keys = bitable.get_existing_keys()
+    # 2. 清空旧记录
+    bitable.delete_all_records()
 
-    # 3. 批量写入新数据
-    return bitable.batch_create_records(df, existing_keys)
+    # 3. 全量写入新数据（旧记录已清空，无需去重）
+    return bitable.batch_create_records(df, existing_keys=set())
