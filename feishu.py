@@ -42,7 +42,7 @@ class FeishuBitable:
             "app_secret": self.app_secret,
         }
         try:
-            resp = requests.post(url, json=payload, timeout=10)
+            resp = requests.post(url, json=payload, timeout=20)
             resp.raise_for_status()
             data = resp.json()
             if data.get("code") == 0:
@@ -85,7 +85,7 @@ class FeishuBitable:
                 params["page_token"] = page_token
 
             try:
-                resp = requests.get(url, headers=self._headers(), params=params, timeout=15)
+                resp = requests.get(url, headers=self._headers(), params=params, timeout=30)
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -164,7 +164,7 @@ class FeishuBitable:
 
             try:
                 resp = requests.post(
-                    url, headers=self._headers(), json=payload, timeout=30
+                    url, headers=self._headers(), json=payload, timeout=60
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -187,6 +187,7 @@ class FeishuBitable:
         """
         清空多维表格中的所有记录。
         先分页查询全部 record_id，再分批调用批量删除 API。
+        云端超时保护：增加超时时间。
 
         文档: https://open.feishu.cn/document/server-docs/docs/bitable-v1/app-table-record/batch_delete
         """
@@ -206,7 +207,7 @@ class FeishuBitable:
 
             try:
                 resp = requests.get(
-                    url, headers=self._headers(), params=params, timeout=15
+                    url, headers=self._headers(), params=params, timeout=30
                 )
                 resp.raise_for_status()
                 data = resp.json()
@@ -246,7 +247,7 @@ class FeishuBitable:
 
             try:
                 resp = requests.post(
-                    del_url, headers=self._headers(), json=payload, timeout=30
+                    del_url, headers=self._headers(), json=payload, timeout=60
                 )
                 resp.raise_for_status()
                 data = resp.json()
