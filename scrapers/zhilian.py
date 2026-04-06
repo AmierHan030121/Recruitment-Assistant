@@ -25,23 +25,18 @@ logger = logging.getLogger(__name__)
 
 
 async def _fetch_jd_zhilian(page, detail_url: str) -> str:
-    """访问智联招聘详情页并提取完整岗位描述。云端超时保护：40秒。"""
+    """访问智联招聘详情页并提取完整岗位描述。"""
     try:
-        # 增加超时到 40 秒，适应云端网络延迟
-        await page.goto(
-            detail_url, 
-            wait_until="domcontentloaded", 
-            timeout=40000
-        )
+        await page.goto(detail_url, wait_until="domcontentloaded", timeout=25000)
 
         try:
             await page.wait_for_selector(
                 ".describtion, .describtion__detail-content, .job-description, "
                 ".pos-ul, .responsibility, [class*='describe'], [class*='detail']",
-                timeout=5000,
+                timeout=10000,
             )
         except Exception:
-            await asyncio.sleep(1)
+            await asyncio.sleep(2)
 
         parts = []
         for selector in (
@@ -53,49 +48,39 @@ async def _fetch_jd_zhilian(page, detail_url: str) -> str:
             ".describe__content",
             ".job-detail-content",
         ):
-            try:
-                el = await page.query_selector(selector)
-                if el:
-                    text = (await el.inner_text()).strip()
-                    if text and len(text) > 20:
-                        parts.append(text)
-            except Exception:
-                continue
+            el = await page.query_selector(selector)
+            if el:
+                text = (await el.inner_text()).strip()
+                if text and len(text) > 20:
+                    parts.append(text)
 
         if parts:
             return "\n".join(parts)
 
-        try:
-            text = await page.evaluate(
-                """() => {
-                    const sels = [
-                        '.describtion', '[class*="describe"]', '[class*="detail-content"]',
-                        '[class*="responsibility"]', '.pos-ul'
-                    ];
-                    const texts = [];
-                    for (const s of sels) {
-                        document.querySelectorAll(s).forEach(e => {
-                            const t = e.innerText.trim();
-                            if (t.length > 20) texts.push(t);
-                        });
-                    }
-                    return [...new Set(texts)].join('\\n');
-                }""",
-                timeout=8000,
-            )
-            if text and len(text.strip()) > 20:
-                return text.strip()
-        except Exception:
-            pass
+        text = await page.evaluate(
+            """() => {
+                const sels = [
+                    '.describtion', '[class*="describe"]', '[class*="detail-content"]',
+                    '[class*="responsibility"]', '.pos-ul'
+                ];
+                const texts = [];
+                for (const s of sels) {
+                    document.querySelectorAll(s).forEach(e => {
+                        const t = e.innerText.trim();
+                        if (t.length > 20) texts.push(t);
+                    });
+                }
+                return [...new Set(texts)].join('\\n');
+            }"""
+        )
+        if text and len(text.strip()) > 20:
+            return text.strip()
 
-        try:
-            body = await page.inner_text("body", timeout=8000)
-            for kw in ("岗位职责", "职位描述", "工作内容", "任职要求", "职位要求"):
-                idx = body.find(kw)
-                if idx >= 0:
-                    return body[idx : idx + 2000].strip()
-        except Exception:
-            pass
+        body = await page.inner_text("body")
+        for kw in ("岗位职责", "职位描述", "工作内容", "任职要求", "职位要求"):
+            idx = body.find(kw)
+            if idx >= 0:
+                return body[idx : idx + 2000].strip()
 
         return ""
     except Exception as e:
@@ -325,8 +310,14 @@ async def scrape_zhilian() -> List[Dict]:
 
             await browser.close()
 
-    except Exception as e:
-        logger.error(f"[智联招聘] 爬虫异常: {e}")
+    except BaseException as e:
+        # 捕获 asyncio.CancelledError（BaseException 子类）等所有异常
+        # 记录日志后继续，将已抓取的数据 return 给上层
+        logger.error(f"[智联招聘] 爬虫中断: {e}（已抓 {len(results)} 条，仍将提交）")
+        try:
+            await browser.close()
+        except Exception:
+            pass
 
     logger.info(
         f"[智联招聘] 共抓取 {len(results)} 条岗位"

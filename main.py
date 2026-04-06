@@ -38,14 +38,16 @@ SCRAPERS = {
 
 
 async def run_scraper(name: str, scrape_func) -> list:
-    """运行单个平台的爬虫，并捕获异常确保其他平台不受影响。"""
+    """运行单个平台的爬虫，捕获所有异常（含 CancelledError）确保已抓数据能被利用。"""
     try:
         logger.info(f"===== 开始抓取 [{name}] =====")
         results = await scrape_func()
         logger.info(f"[{name}] 抓取完成，获取 {len(results)} 条数据")
         return results
-    except Exception as e:
-        logger.error(f"[{name}] 抓取失败: {e}")
+    except BaseException as e:
+        # scrape_func 内部已捕获 CancelledError 并返回部分结果，
+        # 此处兜底：若仍有异常抛出则记录并返回空列表
+        logger.error(f"[{name}] 抓取异常: {e}")
         return []
 
 
@@ -71,47 +73,51 @@ async def main(platforms: list = None, dry_run: bool = False):
 
     # 依次运行各平台爬虫（串行，避免同时开太多浏览器）
     all_jobs = []
-    for key, (name, func) in target_scrapers.items():
-        jobs = await run_scraper(name, func)
-        all_jobs.extend(jobs)
+    try:
+        for key, (name, func) in target_scrapers.items():
+            jobs = await run_scraper(name, func)
+            all_jobs.extend(jobs)
+    except BaseException as e:
+        logger.error(f"爬虫主循环中断: {e}（已收集 {len(all_jobs)} 条，继续清洗提交）")
+    finally:
+        # ⚠️ 无论爬虫是否中途取消，只要有数据就继续清洗和提交
+        logger.info(f"所有平台抓取完毕（或中断），原始数据共 {len(all_jobs)} 条")
 
-    logger.info(f"所有平台抓取完毕，原始数据共 {len(all_jobs)} 条")
+        if not all_jobs:
+            logger.warning("未抓取到任何数据，流程结束")
+            return
 
-    if not all_jobs:
-        logger.warning("未抓取到任何数据，流程结束")
-        return
+        # 数据清洗
+        logger.info("===== 开始数据清洗 =====")
+        df = clean_data(all_jobs)
 
-    # 数据清洗
-    logger.info("===== 开始数据清洗 =====")
-    df = clean_data(all_jobs)
+        if df.empty:
+            logger.warning("清洗后数据为空，流程结束")
+            return
 
-    if df.empty:
-        logger.warning("清洗后数据为空，流程结束")
-        return
+        # 保存 CSV 到 output 文件夹
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+        os.makedirs(output_dir, exist_ok=True)
+        csv_path = os.path.join(
+            output_dir,
+            f"jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+        )
+        df.to_csv(csv_path, index=False, encoding="utf-8-sig")
+        logger.info(f"数据已备份至 {csv_path}")
 
-    # 保存 CSV 到 output 文件夹
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-    os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(
-        output_dir,
-        f"jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-    )
-    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
-    logger.info(f"数据已备份至 {csv_path}")
+        # 同步到飞书
+        if dry_run:
+            logger.info("[DRY RUN] 跳过飞书同步，仅展示数据摘要：")
+            logger.info(f"  - 总记录数: {len(df)}")
+            logger.info(f"  - 平台分布: {df['来源平台'].value_counts().to_dict()}")
+            logger.info(f"  - 岗位类型: {df['岗位类型'].value_counts().to_dict()}")
+        else:
+            logger.info("===== 开始同步至飞书多维表格 =====")
+            new_count = sync_to_feishu(df)
+            logger.info(f"飞书同步完成，新增 {new_count} 条记录")
 
-    # 同步到飞书
-    if dry_run:
-        logger.info("[DRY RUN] 跳过飞书同步，仅展示数据摘要：")
-        logger.info(f"  - 总记录数: {len(df)}")
-        logger.info(f"  - 平台分布: {df['来源平台'].value_counts().to_dict()}")
-        logger.info(f"  - 岗位类型: {df['岗位类型'].value_counts().to_dict()}")
-    else:
-        logger.info("===== 开始同步至飞书多维表格 =====")
-        new_count = sync_to_feishu(df)
-        logger.info(f"飞书同步完成，新增 {new_count} 条记录")
-
-    elapsed = (datetime.now() - start_time).total_seconds()
-    logger.info(f"========== 流程结束，耗时 {elapsed:.1f} 秒 ==========")
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"========== 流程结束，耗时 {elapsed:.1f} 秒 ==========")
 
 
 def parse_args():

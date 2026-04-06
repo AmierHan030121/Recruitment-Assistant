@@ -319,8 +319,10 @@ async def scrape_nowcoder() -> List[Dict]:
             f"{len([c for cs in PROVINCE_CITIES.values() for c in cs])} 个城市）"
         )
 
-    except Exception as e:
-        logger.error(f"[牛客网] 爬虫异常: {e}")
+    except BaseException as e:
+        # 捕获 asyncio.CancelledError（BaseException 子类）等所有异常
+        # 记录日志后继续，将已抓取的数据 return 给上层
+        logger.error(f"[牛客网] 爬虫中断: {e}（已抓 {len(results)} 条，仍将提交）")
     finally:
         await scraper.close()
 
