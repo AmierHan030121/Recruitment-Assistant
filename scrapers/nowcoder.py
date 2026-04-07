@@ -110,38 +110,81 @@ async def _click_job_type_tab(page, job_type: str):
 
 
 async def _open_cascader(page):
-    """打开城市级联筛选器弹出层。"""
+    """打开城市级联筛选器弹出层，并等待内容可见。"""
     trigger = page.locator("div.city-cascader")
     await trigger.click(force=True)
-    await asyncio.sleep(0.5)
+    # 等待弹层真正出现（最多 5 秒）
+    try:
+        await page.wait_for_selector(
+            ".nc-city-cascader-popover", state="visible", timeout=5000
+        )
+    except Exception:
+        await asyncio.sleep(1)
+
+
+async def _js_click_text(page, container_sel: str, text: str, exact: bool = True) -> bool:
+    """
+    在 container_sel 范围内，用 JS 找到整个 innerText 严格等于 text 的元素并点击。
+    返回 True 表示点击成功。
+    """
+    return await page.evaluate("""
+        ([sel, txt, exact]) => {
+            const container = document.querySelector(sel);
+            if (!container) return false;
+            const walker = document.createTreeWalker(
+                container, NodeFilter.SHOW_ELEMENT
+            );
+            while (walker.nextNode()) {
+                const el = walker.currentNode;
+                const t = (el.innerText || '').trim();
+                if (exact ? t === txt : t.includes(txt)) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        }
+    """, [container_sel, text, exact])
 
 
 async def _select_city(page, province: str, city: str):
     """
-    在城市级联筛选器中勾选指定城市：
-    1. 打开级联器
-    2. 滚动到省份并点击
-    3. 点击城市复选框
-    4. 关闭级联器，等待结果刷新
+    在城市级联筛选器中勾选指定城市。
+    直辖市（如上海）：名称直接出现在左侧列表，无需展开省级。
+    普通省份：先点省份展开右侧城市列表，再点城市复选框。
+    全程用 JS 点击避免元素可见性报错。
     """
     await _open_cascader(page)
+    POPOVER = ".nc-city-cascader-popover"
 
-    # 点击省份
-    prov_item = page.locator(
-        f".nc-city-cascader-popover div.cascader-item:has-text('{province}')"
-    )
-    try:
-        await prov_item.scroll_into_view_if_needed(timeout=3000)
-    except Exception:
-        pass
-    await prov_item.click(force=True)
-    await asyncio.sleep(0.3)
+    # 直辖市：名称已在左侧列表中，直接点省级内容（即城名）
+    # 普通省：先点省份展开
+    ok = await _js_click_text(page, POPOVER, province, exact=True)
+    if not ok:
+        raise Exception(f"未找到省份项: {province}")
+    await asyncio.sleep(0.5)
 
-    # 点击城市复选框
-    city_cb = page.locator(
-        f".nc-city-cascader-popover label.cascader-item-content:has-text('{city}')"
-    )
-    await city_cb.first.click(force=True)
+    # 直辖市情况下 province==city，左侧点击即展开右侧城区列表
+    # 普通省展开后右侧出现城市复选框
+    # 两种情况都用 JS 点击包含 city 文字的 label
+    ok2 = await page.evaluate("""
+        ([sel, city]) => {
+            const container = document.querySelector(sel);
+            if (!container) return false;
+            // 找 label 或 span，内容严格等于 city
+            for (const el of container.querySelectorAll(
+                'label.cascader-item-content, span.cascader-item-content, label'
+            )) {
+                if ((el.innerText || '').trim() === city) {
+                    el.click();
+                    return true;
+                }
+            }
+            return false;
+        }
+    """, [POPOVER, city])
+    if not ok2:
+        raise Exception(f"未找到城市复选框: {city}")
     await asyncio.sleep(0.3)
 
     # 关闭级联器（点击页面空白处）
@@ -152,21 +195,22 @@ async def _select_city(page, province: str, city: str):
 async def _deselect_city(page, province: str, city: str):
     """取消城市勾选（再点一次复选框取消）。"""
     await _open_cascader(page)
+    POPOVER = ".nc-city-cascader-popover"
 
-    prov_item = page.locator(
-        f".nc-city-cascader-popover div.cascader-item:has-text('{province}')"
-    )
-    try:
-        await prov_item.scroll_into_view_if_needed(timeout=3000)
-    except Exception:
-        pass
-    await prov_item.click(force=True)
-    await asyncio.sleep(0.3)
+    await _js_click_text(page, POPOVER, province, exact=True)
+    await asyncio.sleep(0.5)
 
-    city_cb = page.locator(
-        f".nc-city-cascader-popover label.cascader-item-content:has-text('{city}')"
-    )
-    await city_cb.first.click(force=True)
+    await page.evaluate("""
+        ([sel, city]) => {
+            const container = document.querySelector(sel);
+            if (!container) return;
+            for (const el of container.querySelectorAll(
+                'label.cascader-item-content, span.cascader-item-content, label'
+            )) {
+                if ((el.innerText || '').trim() === city) { el.click(); return; }
+            }
+        }
+    """, [POPOVER, city])
     await asyncio.sleep(0.3)
 
     await page.mouse.click(10, 10)
