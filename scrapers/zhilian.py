@@ -1,11 +1,10 @@
 """
 智联招聘爬虫模块。
-策略：按「城市 × 职位类型」逐一搜索。
-- 北京/上海：每个组合抓取最多 5 页
+策略：按「城市 × 职位类型 × 页码」纯 URL 驱动，无需点击筛选器。
+- URL 格式: sou.zhaopin.com/?jl={城市}&kw={关键词}&p={页码}&et={类型码}
+- 杭州/上海：每个组合抓取最多 5 页
 - 其余城市：每个组合仅抓取第 1 页
-城市通过 URL 参数 jl={城市名} 指定。
-职位类型通过页面「职位类型」筛选下拉框逐个选择（全职 / 兼职/临时 / 实习 / 校园）。
-逐条访问详情页获取完整岗位描述。
+- 收到 SIGTERM 时安全退出并返回已抓取数据。
 """
 
 import asyncio
@@ -88,51 +87,14 @@ async def _fetch_jd_zhilian(page, detail_url: str) -> str:
         return ""
 
 
-async def _click_job_type_filter(page, job_type: str) -> bool:
-    """
-    点击「职位类型」筛选下拉框并选择指定类型。
-    返回 True 表示成功选中，False 表示失败。
-    """
-    try:
-        # 查找"职位类型"筛选按钮
-        filter_btn = page.locator(
-            "[class*='filter'] >> text=职位类型, "
-            "[class*='condition'] >> text=职位类型, "
-            "[class*='screen'] >> text=职位类型"
-        ).first
-        await filter_btn.click(timeout=5000)
-        await asyncio.sleep(0.5)
-
-        # 在下拉面板中选择目标类型
-        option = page.locator(
-            f"[class*='filter'] >> text='{job_type}', "
-            f"[class*='option'] >> text='{job_type}'"
-        ).first
-        await option.click(timeout=5000)
-        await asyncio.sleep(2)
-        return True
-    except Exception as e:
-        logger.debug(f"[智联招聘] 点击职位类型[{job_type}]失败: {e}")
-        return False
-
-
-async def _clear_filters(page):
-    """清除当前所有筛选条件（点击"清空筛选条件"）。"""
-    try:
-        clear_btn = page.locator("text=清空筛选条件").first
-        if await clear_btn.is_visible(timeout=2000):
-            await clear_btn.click()
-            await asyncio.sleep(1)
-    except Exception:
-        pass
-
-
 async def scrape_zhilian() -> List[Dict]:
-    """按「城市 × 职位类型」逐一抓取智联招聘的数据分析岗位。
-    北京/上海抓取最多 ZHILIAN_MAX_PAGES 页，其余城市仅第 1 页。
-    """
+    """按「城市 × 职位类型 × 页码」纯 URL 参数驱动抓取智联招聘。"""
+    # 导入放在函数内以避免循环引用
+    import main as _main
+
     results: List[Dict] = []
     kw_encoded = urllib.parse.quote(SEARCH_KEYWORD)
+    browser = None
 
     try:
         async with async_playwright() as p:
@@ -172,6 +134,10 @@ async def scrape_zhilian() -> List[Dict]:
             await asyncio.sleep(2)
 
             for city in TARGET_CITIES:
+                if _main.shutdown_requested:
+                    logger.warning("[智联招聘] 收到终止信号，停止抓取")
+                    break
+
                 city_encoded = urllib.parse.quote(city)
                 max_pages = (
                     ZHILIAN_MAX_PAGES
@@ -179,33 +145,30 @@ async def scrape_zhilian() -> List[Dict]:
                     else 1
                 )
 
-                for job_type in ZHILIAN_JOB_TYPES:
+                for job_type, et_value in ZHILIAN_JOB_TYPES.items():
+                    if _main.shutdown_requested:
+                        break
+
                     for page_num in range(1, max_pages + 1):
+                        if _main.shutdown_requested:
+                            break
+
+                        # 纯 URL 参数：jl=城市 kw=关键词 p=页码 et=职位类型
                         page_url = (
                             f"https://sou.zhaopin.com/?"
-                            f"jl={city_encoded}&kw={kw_encoded}&p={page_num}"
+                            f"jl={city_encoded}&kw={kw_encoded}"
+                            f"&p={page_num}&et={et_value}"
                         )
                         logger.info(
                             f"[智联招聘] [{city}] [{job_type}] "
                             f"第 {page_num}/{max_pages} 页..."
                         )
 
-                        # 每次重新加载页面（确保筛选状态干净）
                         await list_page.goto(
                             page_url,
                             wait_until="domcontentloaded", timeout=30000,
                         )
                         await asyncio.sleep(2)
-
-                        # 尝试选择职位类型
-                        filter_ok = await _click_job_type_filter(
-                            list_page, job_type,
-                        )
-                        if not filter_ok:
-                            logger.debug(
-                                f"[智联招聘] [{city}] "
-                                f"职位类型[{job_type}]筛选跳过"
-                            )
 
                         # 等待卡片
                         try:
@@ -217,8 +180,7 @@ async def scrape_zhilian() -> List[Dict]:
                                 f"[智联招聘] [{city}] [{job_type}] "
                                 f"第 {page_num} 页无职位卡片，停止翻页"
                             )
-                            await random_delay(1, 2)
-                            break  # 无结果则停止该类型的后续页
+                            break
 
                         cards = await list_page.query_selector_all(
                             ".joblist-box__item"
@@ -228,7 +190,6 @@ async def scrape_zhilian() -> List[Dict]:
                                 f"[智联招聘] [{city}] [{job_type}] "
                                 f"第 {page_num} 页无结果，停止翻页"
                             )
-                            await random_delay(1, 2)
                             break
 
                         for i, card in enumerate(cards):
@@ -284,7 +245,7 @@ async def scrape_zhilian() -> List[Dict]:
                                     jd = await _fetch_jd_zhilian(
                                         detail_page, detail_url,
                                     )
-                                    await random_delay(1, 3)
+                                    await random_delay(1, 2)
 
                                 if job_name:
                                     results.append({
@@ -309,15 +270,15 @@ async def scrape_zhilian() -> List[Dict]:
                         await random_delay(MIN_DELAY, MAX_DELAY)
 
             await browser.close()
+            browser = None
 
     except BaseException as e:
-        # 捕获 asyncio.CancelledError（BaseException 子类）等所有异常
-        # 记录日志后继续，将已抓取的数据 return 给上层
         logger.error(f"[智联招聘] 爬虫中断: {e}（已抓 {len(results)} 条，仍将提交）")
-        try:
-            await browser.close()
-        except Exception:
-            pass
+        if browser:
+            try:
+                await browser.close()
+            except Exception:
+                pass
 
     logger.info(
         f"[智联招聘] 共抓取 {len(results)} 条岗位"

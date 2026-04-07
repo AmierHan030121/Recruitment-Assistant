@@ -176,6 +176,8 @@ async def _fetch_jd(page, url: str) -> str:
 
 async def scrape_nowcoder() -> List[Dict]:
     """按「职位类型 × 城市」逐一抓取牛客网的数据分析岗位。"""
+    import main as _main
+
     scraper = BaseScraper("牛客网")
     results: List[Dict] = []
     kw_encoded = urllib.parse.quote(SEARCH_KEYWORD)
@@ -190,6 +192,10 @@ async def scrape_nowcoder() -> List[Dict]:
         detail_page = await scraper.new_page()
 
         for job_type in NOWCODER_JOB_TYPES:
+            if _main.shutdown_requested:
+                logger.warning("[牛客网] 收到终止信号，停止抓取")
+                break
+
             logger.info(f"[牛客网] ===== 开始抓取【{job_type}】类型 =====")
 
             # 每个职位类型重新加载搜索页（ reset 所有筛选状态）
@@ -206,7 +212,11 @@ async def scrape_nowcoder() -> List[Dict]:
                 continue
 
             for province, cities in PROVINCE_CITIES.items():
+                if _main.shutdown_requested:
+                    break
                 for city in cities:
+                    if _main.shutdown_requested:
+                        break
                     logger.info(f"[牛客网] [{job_type}] [{city}] 选择城市...")
                     try:
                         await _select_city(list_page, province, city)

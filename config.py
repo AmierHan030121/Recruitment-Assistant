@@ -40,7 +40,13 @@ TARGET_CITIES = [city for cities in PROVINCE_CITIES.values() for city in cities]
 NOWCODER_JOB_TYPES = ["实习", "校招", "社招"]
 
 # ==================== 智联招聘职位类型 ====================
-ZHILIAN_JOB_TYPES = ["全职", "兼职/临时", "实习", "校园"]
+# 职位类型 → URL 参数 et 值（直接通过 URL 筛选，无需点击页面筛选器）
+# 参考: zhaopin.com/sou/jl{city}/kw{keyword}/p{page}?et={type}
+ZHILIAN_JOB_TYPES = {
+    "全职": 2,
+    "兼职": 3,
+    "实习": 4,
+}
 
 # ==================== 智联招聘多页抓取城市 ====================
 # 杭州/上海在智联招聘上抓取最多 5 页，其余城市仅抓取第 1 页

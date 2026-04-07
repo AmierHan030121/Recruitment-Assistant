@@ -15,7 +15,7 @@ on:
 jobs:
   scrape-and-sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     env:
       # 从 GitHub Secrets 读取飞书配置
@@ -74,5 +74,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: job-data-${{ github.run_number }}
-          path: "*.csv"
+          path: "output/*.csv"
           retention-days: 7
