@@ -130,6 +130,18 @@ def clean_data(raw_jobs: List[Dict]) -> pd.DataFrame:
     if before > after:
         logger.info(f"数据去重: {before} -> {after} 条（移除 {before - after} 条重复）")
 
+    # 安全过滤：牛客网实习岗位不应有月薪/年薪格式（如 15K·12薪 / 15-35K·12薪）
+    # 这类记录是因标签点击失效导致全职岗位混入，直接剔除
+    fulltime_mask = (
+        (df["来源平台"] == "牛客网") &
+        (df["岗位类型"] == "实习") &
+        df["薪资"].str.contains(r'\d+K[·\s]', regex=True, na=False, case=False)
+    )
+    removed = fulltime_mask.sum()
+    if removed:
+        logger.info(f"过滤牛客网全职薪资格式记录 {removed} 条（非实习）")
+        df = df[~fulltime_mask]
+
     df = df.reset_index(drop=True)
     logger.info(f"清洗完成，最终有效数据 {len(df)} 条")
     return df

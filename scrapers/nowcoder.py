@@ -70,9 +70,42 @@ async def _hide_login_dialog(page):
 
 
 async def _click_job_type_tab(page, job_type: str):
-    """点击职位类型标签（实习 / 校招 / 社招）。"""
-    tab = page.locator(f"div.filter-recruit-type:has-text('{job_type}')")
-    await tab.click(force=True)
+    """
+    精确点击职位类型标签（实习）。
+    使用 JavaScript 遍历 DOM，找到文本节点内容严格等于 job_type 的叶子元素并点击，
+    避免 Playwright :has-text() 匹配到包含全部标签文字的外层容器。
+    """
+    clicked = await page.evaluate("""
+        (jobType) => {
+            // 找所有"文本节点内容严格等于 jobType"的元素
+            const candidates = [];
+            document.querySelectorAll('*').forEach(el => {
+                const directText = Array.from(el.childNodes)
+                    .filter(n => n.nodeType === Node.TEXT_NODE)
+                    .map(n => n.textContent.trim())
+                    .join('');
+                if (directText === jobType) candidates.push(el);
+            });
+            // 优先点击 class 里含有 recruit / filter / tab 的元素
+            for (const el of candidates) {
+                const cls = (el.className || '').toLowerCase();
+                if (cls.includes('recruit') || cls.includes('filter') || cls.includes('tab')) {
+                    el.click();
+                    return 'class:' + el.className;
+                }
+            }
+            // 兜底：点击第一个候选
+            if (candidates.length > 0) {
+                candidates[0].click();
+                return 'fallback:' + candidates[0].tagName;
+            }
+            return null;
+        }
+    """, job_type)
+
+    if not clicked:
+        raise Exception(f"未找到职位类型标签: {job_type}")
+    logger.debug(f"[牛客网] 点击标签 [{job_type}] → {clicked}")
     await asyncio.sleep(2)
 
 
