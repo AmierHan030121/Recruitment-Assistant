@@ -1,9 +1,9 @@
 """
 智联招聘爬虫模块。
-策略：按「城市 × 职位类型 × 页码」纯 URL 驱动，无需点击筛选器。
-- URL 格式: sou.zhaopin.com/?jl={城市}&kw={关键词}&p={页码}&et={类型码}
-- 杭州/上海：每个组合抓取最多 5 页
-- 其余城市：每个组合仅抓取第 1 页
+策略：按「城市 × 页码」纯 URL 驱动，仅抓取实习岗位。
+- URL 格式: sou.zhaopin.com/?jl={city_code}&kw={keyword}&p={page}&et=4
+- 城市编码: 杭州=653, 南京=635, 上海=538
+- 每个城市最多抓取 5 页
 - 收到 SIGTERM 时安全退出并返回已抓取数据。
 """
 
@@ -14,7 +14,7 @@ from typing import List, Dict
 
 from playwright.async_api import async_playwright
 from config import (
-    SEARCH_KEYWORD, TARGET_CITIES, ZHILIAN_JOB_TYPES,
+    SEARCH_KEYWORD, ZHILIAN_JOB_TYPES, ZHILIAN_CITY_CODES,
     MIN_DELAY, MAX_DELAY,
     ZHILIAN_MULTI_PAGE_CITIES, ZHILIAN_MAX_PAGES,
 )
@@ -133,12 +133,11 @@ async def scrape_zhilian() -> List[Dict]:
             )
             await asyncio.sleep(2)
 
-            for city in TARGET_CITIES:
+            for city, city_code in ZHILIAN_CITY_CODES.items():
                 if _main.shutdown_requested:
                     logger.warning("[智联招聘] 收到终止信号，停止抓取")
                     break
 
-                city_encoded = urllib.parse.quote(city)
                 max_pages = (
                     ZHILIAN_MAX_PAGES
                     if city in ZHILIAN_MULTI_PAGE_CITIES
@@ -153,10 +152,10 @@ async def scrape_zhilian() -> List[Dict]:
                         if _main.shutdown_requested:
                             break
 
-                        # 纯 URL 参数：jl=城市 kw=关键词 p=页码 et=职位类型
+                        # 纯 URL 参数：jl=城市编码 kw=关键词 p=页码 et=职位类型
                         page_url = (
                             f"https://sou.zhaopin.com/?"
-                            f"jl={city_encoded}&kw={kw_encoded}"
+                            f"jl={city_code}&kw={kw_encoded}"
                             f"&p={page_num}&et={et_value}"
                         )
                         logger.info(
@@ -282,7 +281,7 @@ async def scrape_zhilian() -> List[Dict]:
 
     logger.info(
         f"[智联招聘] 共抓取 {len(results)} 条岗位"
-        f"（{len(TARGET_CITIES)} 个城市 × "
+        f"（{len(ZHILIAN_CITY_CODES)} 个城市 × "
         f"{len(ZHILIAN_JOB_TYPES)} 种类型）"
     )
     return results

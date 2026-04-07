@@ -1,8 +1,7 @@
 """
 牛客网爬虫模块。
-策略：按「职位类型 × 城市」逐一搜索，每个组合仅抓取第 1 页。
-职位类型：实习 / 校招 / 社招（分别点击对应标签页）。
-城市筛选：通过页面城市级联筛选器逐个勾选（一个城市一搜索，保证页面结果充分）。
+策略：仅抓取「实习」类型，按城市逐个搜索，每个组合仅抓取第 1 页。
+城市筛选：通过页面城市级联筛选器逐个勾选（杭州/南京/上海）。
 
 DOM 结构（搜索页 /search?type=job）：
   div.filter-recruit-type  <- 职位类型标签（实习 / 校招 / 社招）
@@ -38,6 +37,7 @@ _PREFIX_RE = re.compile(r'^(校招|实习|社招|急招|春招|秋招)\s*[|丨]\
 _NON_CITY_KW = (
     "学业", "在线", "简历", "处理", "HR", "活跃", "牛友", "收藏",
     "届", "本科", "硕士", "博士", "大专", "/周", "个月", "天/周",
+    "投递", "刚刚", "有人", "浏览", "沟通", "更新", "发布",
 )
 
 
@@ -50,6 +50,9 @@ def _pick_city(info_texts: list) -> str:
         if any(kw in text for kw in _NON_CITY_KW):
             continue
         if re.fullmatch(r'[A-Za-z0-9+#./ ]+', text):
+            continue
+        # 城市名称一般 2-6 个字符
+        if len(text) > 6:
             continue
         return text
     return info_texts[2] if len(info_texts) > 2 else ""

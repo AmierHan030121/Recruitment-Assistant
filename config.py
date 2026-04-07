@@ -6,10 +6,12 @@
 import os
 
 # ==================== 飞书开放平台配置 ====================
-FEISHU_APP_ID = os.getenv("FEISHU_APP_ID", "cli_a958b47358785bd6")
-FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET", "S60WUzh6FsMrSF5gyyaPQgkaBNwDNHMQ")
-FEISHU_APP_TOKEN = os.getenv("FEISHU_APP_TOKEN", "GXOvwcD08imZ1lkroOec6P9knlg")  # 多维表格 app_token
-FEISHU_TABLE_ID = os.getenv("FEISHU_TABLE_ID", "tbl2zCRWvAo5WEPN")    # 多维表格中的数据表 ID
+# 注意：GitHub Actions 中 Secrets 未配置时环境变量为空字符串，
+# 必须用 `or` 而非 getenv 默认值来回退到硬编码值。
+FEISHU_APP_ID = os.getenv("FEISHU_APP_ID") or "cli_a958b47358785bd6"
+FEISHU_APP_SECRET = os.getenv("FEISHU_APP_SECRET") or "S60WUzh6FsMrSF5gyyaPQgkaBNwDNHMQ"
+FEISHU_APP_TOKEN = os.getenv("FEISHU_APP_TOKEN") or "GXOvwcD08imZ1lkroOec6P9knlg"
+FEISHU_TABLE_ID = os.getenv("FEISHU_TABLE_ID") or "tbl2zCRWvAo5WEPN"
 
 # 飞书 API 基础地址
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"
@@ -28,29 +30,32 @@ PAGE_TIMEOUT = 60000
 # ==================== 目标城市列表 ====================
 # 省份 → 城市映射（用于牛客网城市级联筛选器导航）
 PROVINCE_CITIES = {
-    "浙江省": ["杭州", "宁波", "绍兴", "湖州", "嘉兴"],
-    "江苏省": ["南京", "苏州", "扬州"],
+    "浙江省": ["杭州"],
+    "江苏省": ["南京"],
     "上海": ["上海"],
 }
 
-# 扁平化城市列表（用于智联招聘 URL 参数）
+# 扁平化城市列表
 TARGET_CITIES = [city for cities in PROVINCE_CITIES.values() for city in cities]
 
 # ==================== 牛客网职位类型 ====================
-NOWCODER_JOB_TYPES = ["实习", "校招", "社招"]
+NOWCODER_JOB_TYPES = ["实习"]
 
 # ==================== 智联招聘职位类型 ====================
 # 职位类型 → URL 参数 et 值（直接通过 URL 筛选，无需点击页面筛选器）
-# 参考: zhaopin.com/sou/jl{city}/kw{keyword}/p{page}?et={type}
-ZHILIAN_JOB_TYPES = {
-    "全职": 2,
-    "兼职": 3,
-    "实习": 4,
+ZHILIAN_JOB_TYPES = {"实习": 4}
+
+# ==================== 智联招聘城市编码 ====================
+# 智联招聘 URL 中 jl 参数使用数字城市编码（非中文名称）
+ZHILIAN_CITY_CODES = {
+    "杭州": "653",
+    "南京": "635",
+    "上海": "538",
 }
 
-# ==================== 智联招聘多页抓取城市 ====================
-# 杭州/上海在智联招聘上抓取最多 5 页，其余城市仅抓取第 1 页
-ZHILIAN_MULTI_PAGE_CITIES = {"杭州", "上海"}
+# ==================== 智联招聘多页抓取 ====================
+# 仅 3 个城市 × 1 种类型，全部启用多页（最多 5 页）
+ZHILIAN_MULTI_PAGE_CITIES = {"杭州", "南京", "上海"}
 ZHILIAN_MAX_PAGES = 5
 
 # ==================== 数据清洗：技术工具关键词 ====================
