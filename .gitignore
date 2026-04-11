@@ -16,3 +16,6 @@ Thumbs.db
 
 # 环境变量文件（不要提交密钥！）
 .env
+
+# 其他
+.gitignore
