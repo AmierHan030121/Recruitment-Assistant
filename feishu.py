@@ -10,11 +10,8 @@ import requests
 import pandas as pd
 from typing import Set
 from config import (
-    FEISHU_APP_ID,
-    FEISHU_APP_SECRET,
-    FEISHU_APP_TOKEN,
-    FEISHU_TABLE_ID,
     FEISHU_BASE_URL,
+    get_runtime_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -24,10 +21,11 @@ class FeishuBitable:
     """飞书多维表格操作封装。"""
 
     def __init__(self):
-        self.app_id = FEISHU_APP_ID
-        self.app_secret = FEISHU_APP_SECRET
-        self.app_token = FEISHU_APP_TOKEN
-        self.table_id = FEISHU_TABLE_ID
+        cfg = get_runtime_config().feishu
+        self.app_id = cfg.app_id
+        self.app_secret = cfg.app_secret
+        self.app_token = cfg.app_token
+        self.table_id = cfg.table_id
         self.base_url = FEISHU_BASE_URL
         self.tenant_token = ""
 
