@@ -1,29 +1,27 @@
 """
-主入口：协调爬虫、数据清洗、飞书同步的完整执行流程。
-
-执行方式：
-    python main.py              # 运行所有平台
-    python main.py --platform nowcoder  # 仅运行牛客网
-    python main.py --dry-run    # 仅爬取和清洗，不写入飞书
+主入口：协调智联主抓、牛客补量、数据清洗和飞书同步。
 """
 
-import sys
-import os
-import signal
+import argparse
 import asyncio
 import logging
-import argparse
+import os
+import signal
+import sys
 from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
-# 将项目根目录加入 sys.path，确保模块可被正确导入
+import pandas as pd
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from cleaner import clean_data, validate_final_dataset
+from config import get_runtime_config
+from feishu import sync_to_feishu
 from scrapers.nowcoder import scrape_nowcoder
 from scrapers.zhilian import scrape_zhilian
-from cleaner import clean_data
-from feishu import sync_to_feishu
 
-# ==================== 日志配置 ====================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -31,115 +29,108 @@ logging.basicConfig(
 )
 logger = logging.getLogger("main")
 
-# ==================== 优雅退出信号 ====================
-# GitHub Actions cancel 时发送 SIGTERM，Python 默认直接退出不执行 finally。
-# 注册信号处理器将 SIGTERM 转为标志位，让循环安全退出后执行保存逻辑。
 shutdown_requested = False
 
 
 def _handle_shutdown(signum, frame):
+    del frame
     global shutdown_requested
     shutdown_requested = True
-    logger.warning(f"收到终止信号 (signal={signum})，将在当前任务完成后保存已有数据...")
+    logger.warning(f"收到终止信号 (signal={signum})，将在当前任务完成后退出...")
 
 
 signal.signal(signal.SIGTERM, _handle_shutdown)
 signal.signal(signal.SIGINT, _handle_shutdown)
 
-# 平台名称到爬虫函数的映射
-SCRAPERS = {
-    "nowcoder": ("牛客网", scrape_nowcoder),
-    "zhilian": ("智联招聘", scrape_zhilian),
-}
+
+def should_run_nowcoder(current_final_count: int, target_count: int) -> bool:
+    return current_final_count < target_count
 
 
-def _save_and_sync(all_jobs: list, dry_run: bool) -> None:
-    """清洗数据 → 保存 CSV → 同步飞书。供正常结束和信号中断时调用。"""
-    if not all_jobs:
-        logger.warning("无数据可保存")
-        return
+def save_output_files(raw_jobs: list[dict], final_df: pd.DataFrame, output_dir: Optional[Path] = None) -> dict[str, Path]:
+    output_dir = output_dir or Path(__file__).resolve().parent / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("===== 开始数据清洗 =====")
-    df = clean_data(all_jobs)
-    if df.empty:
-        logger.warning("清洗后数据为空")
-        return
+    label = datetime.now().strftime("%Y%m%d_%H%M%S")
+    raw_path = output_dir / f"raw_jobs_{label}.csv"
+    final_path = output_dir / f"final_jobs_{label}.csv"
 
-    # 保存 CSV
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-    os.makedirs(output_dir, exist_ok=True)
-    csv_path = os.path.join(
-        output_dir,
-        f"jobs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-    )
-    df.to_csv(csv_path, index=False, encoding="utf-8-sig")
-    logger.info(f"数据已备份至 {csv_path}")
-
-    # 同步飞书
-    if dry_run:
-        logger.info("[DRY RUN] 跳过飞书同步")
-    else:
-        logger.info("===== 开始同步至飞书多维表格 =====")
-        new_count = sync_to_feishu(df)
-        logger.info(f"飞书同步完成，写入 {new_count} 条记录")
+    pd.DataFrame(raw_jobs).to_csv(raw_path, index=False, encoding="utf-8-sig")
+    final_df.to_csv(final_path, index=False, encoding="utf-8-sig")
+    return {"raw": raw_path, "final": final_path}
 
 
 async def run_scraper(name: str, scrape_func) -> list:
-    """运行单个平台的爬虫。"""
     try:
         logger.info(f"===== 开始抓取 [{name}] =====")
         results = await scrape_func()
         logger.info(f"[{name}] 抓取完成，获取 {len(results)} 条数据")
         return results
-    except BaseException as e:
-        logger.error(f"[{name}] 抓取异常: {e}")
+    except BaseException as exc:
+        logger.error(f"[{name}] 抓取异常: {exc}")
         return []
 
 
 async def main(platforms: list = None, dry_run: bool = False):
+    cfg = get_runtime_config()
     start_time = datetime.now()
     logger.info(f"========== 招聘信息自动抓取系统启动 {start_time.strftime('%Y-%m-%d %H:%M:%S')} ==========")
 
-    if platforms:
-        target_scrapers = {k: v for k, v in SCRAPERS.items() if k in platforms}
-    else:
-        target_scrapers = SCRAPERS
-
-    if not target_scrapers:
-        logger.error(f"未找到指定平台，可选: {list(SCRAPERS.keys())}")
-        return
-
+    platforms = platforms or ["zhilian", "nowcoder"]
+    requested = set(platforms)
     all_jobs = []
+    source_counts = {"智联招聘": 0, "牛客网": 0}
 
-    for key, (name, func) in target_scrapers.items():
-        if shutdown_requested:
-            logger.warning(f"收到终止信号，跳过 [{name}]")
-            break
-        jobs = await run_scraper(name, func)
-        all_jobs.extend(jobs)
+    if "zhilian" in requested and not shutdown_requested:
+        zhilian_jobs = await run_scraper("智联招聘", scrape_zhilian)
+        source_counts["智联招聘"] = len(zhilian_jobs)
+        all_jobs.extend(zhilian_jobs)
 
-    logger.info(f"抓取阶段结束，原始数据共 {len(all_jobs)} 条")
+    interim_df = clean_data(all_jobs, target_count=cfg.target_final_count)
 
-    # 无论是正常完成还是信号中断，都保存数据
-    _save_and_sync(all_jobs, dry_run)
+    if (
+        "nowcoder" in requested
+        and not shutdown_requested
+        and should_run_nowcoder(len(interim_df), cfg.target_final_count)
+    ):
+        nowcoder_jobs = await run_scraper("牛客网", scrape_nowcoder)
+        source_counts["牛客网"] = len(nowcoder_jobs)
+        all_jobs.extend(nowcoder_jobs)
+
+    final_df = clean_data(all_jobs, target_count=cfg.target_final_count)
+    output_paths = save_output_files(all_jobs, final_df)
+    logger.info(f"原始数据已保存到 {output_paths['raw']}")
+    logger.info(f"最终数据已保存到 {output_paths['final']}")
+
+    quality_ok, reasons = validate_final_dataset(final_df, source_counts)
+
+    if dry_run:
+        logger.info("[DRY RUN] 跳过飞书同步")
+    else:
+        if not quality_ok:
+            for reason in reasons:
+                logger.error(reason)
+            raise SystemExit(1)
+        logger.info("===== 开始同步至飞书多维表格 =====")
+        written = sync_to_feishu(final_df)
+        logger.info(f"飞书同步完成，写入 {written} 条记录")
 
     elapsed = (datetime.now() - start_time).total_seconds()
     logger.info(f"========== 流程结束，耗时 {elapsed:.1f} 秒 ==========")
 
 
 def parse_args():
-    """解析命令行参数。"""
     parser = argparse.ArgumentParser(description="招聘信息自动化获取推送助手")
     parser.add_argument(
         "--platform",
         nargs="+",
-        choices=list(SCRAPERS.keys()),
+        choices=["nowcoder", "zhilian"],
         help="指定要抓取的平台（可多选），默认抓取全部",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="仅抓取和清洗数据，不写入飞书",
+        help="仅抓取和清洗，不写入飞书",
     )
     return parser.parse_args()
 
