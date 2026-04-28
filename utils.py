@@ -7,12 +7,13 @@
 
 import random
 import asyncio
-from fake_useragent import UserAgent
 
 
 def get_random_ua() -> str:
     """生成随机 User-Agent 字符串。"""
     try:
+        from fake_useragent import UserAgent
+
         ua = UserAgent()
         return ua.random
     except Exception:

@@ -8,11 +8,11 @@
 """
 
 import asyncio
+import json
 import logging
 import urllib.parse
 from typing import List, Dict
 
-from playwright.async_api import async_playwright
 from config import (
     SEARCH_KEYWORD, ZHILIAN_JOB_TYPES, ZHILIAN_CITY_CODES,
     MIN_DELAY, MAX_DELAY,
@@ -21,6 +21,45 @@ from config import (
 from utils import random_delay
 
 logger = logging.getLogger(__name__)
+
+
+def extract_initial_state(html: str) -> dict:
+    marker = "__INITIAL_STATE__="
+    start = html.find(marker)
+    if start < 0:
+        raise ValueError("未找到智联 __INITIAL_STATE__")
+    after = html[start + len(marker):]
+    end = after.find("</script>")
+    if end < 0:
+        raise ValueError("智联 __INITIAL_STATE__ 缺少结束标签")
+    payload = after[:end].strip()
+    return json.loads(payload)
+
+
+def parse_zhilian_positions(state: dict, city_name: str, keyword: str) -> list[dict]:
+    jobs = []
+    for item in state.get("positionList", []):
+        desc = (
+            item.get("jobDetailData", {})
+            .get("position", {})
+            .get("desc", {})
+            .get("description", "")
+        )
+        jobs.append({
+            "岗位名称": item.get("name", "").strip(),
+            "公司名称": item.get("companyName", "").strip(),
+            "薪资": item.get("salary60", "").strip() or "面议",
+            "工作地点": item.get("workCity", "").strip() or city_name,
+            "岗位描述": desc.strip(),
+            "岗位类型": "实习",
+            "来源平台": "智联招聘",
+            "原始ID": item.get("number", "").strip(),
+            "原始URL": item.get("positionURL", "").strip(),
+            "抓取关键词": keyword,
+            "抓取城市": city_name,
+            "发布时间": item.get("publishTime", "").strip(),
+        })
+    return jobs
 
 
 async def _fetch_jd_zhilian(page, detail_url: str) -> str:
@@ -91,6 +130,7 @@ async def scrape_zhilian() -> List[Dict]:
     """按「城市 × 职位类型 × 页码」纯 URL 参数驱动抓取智联招聘。"""
     # 导入放在函数内以避免循环引用
     import main as _main
+    from playwright.async_api import async_playwright
 
     results: List[Dict] = []
     kw_encoded = urllib.parse.quote(SEARCH_KEYWORD)

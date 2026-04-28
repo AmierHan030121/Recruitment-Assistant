@@ -24,7 +24,7 @@ import logging
 import urllib.parse
 from typing import List, Dict
 
-from scrapers.base import BaseScraper
+from bs4 import BeautifulSoup
 from config import (
     SEARCH_KEYWORD, PROVINCE_CITIES, NOWCODER_JOB_TYPES,
 )
@@ -33,6 +33,7 @@ from utils import random_delay
 logger = logging.getLogger(__name__)
 
 _PREFIX_RE = re.compile(r'^(校招|实习|社招|急招|春招|秋招)\s*[|丨]\s*', re.IGNORECASE)
+ROLE_FAMILY_TERMS = ("数据分析", "商业分析", "经营分析", "数据运营", "数据产品分析", "用户研究")
 
 _NON_CITY_KW = (
     "学业", "在线", "简历", "处理", "HR", "活跃", "牛友", "收藏",
@@ -56,6 +57,47 @@ def _pick_city(info_texts: list) -> str:
             continue
         return text
     return info_texts[2] if len(info_texts) > 2 else ""
+
+
+def parse_nowcoder_search_results(html: str, target_city: str, keyword: str) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    jobs = []
+    for link in soup.select("a[href*='/jobs/detail/']"):
+        text = " ".join(link.get_text("\n", strip=True).split())
+        if target_city not in text:
+            continue
+        if "实习" not in text:
+            continue
+        if not any(term in text for term in ROLE_FAMILY_TERMS):
+            continue
+        lines = [line.strip() for line in link.get_text("\n", strip=True).splitlines() if line.strip()]
+        jobs.append({
+            "岗位名称": lines[0],
+            "薪资": lines[1] if len(lines) > 1 else "面议",
+            "工作地点": target_city,
+            "原始URL": link["href"],
+            "抓取关键词": keyword,
+            "抓取城市": target_city,
+        })
+    return jobs
+
+
+def parse_nowcoder_job_detail(html: str) -> dict:
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text("\n", strip=True)
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    company = next(line for line in lines if "有限公司" in line)
+    city = next(line for line in lines if line in {"杭州", "上海", "南京"})
+    salary = next(line for line in lines if "元/天" in line or line == "面议")
+    return {
+        "岗位名称": soup.find("h1").get_text(strip=True),
+        "公司名称": company,
+        "薪资": salary,
+        "工作地点": city,
+        "岗位描述": text[text.index("岗位职责"):],
+        "岗位类型": "实习",
+        "来源平台": "牛客网",
+    }
 
 
 # --------------- 页面交互辅助 ---------------
@@ -257,6 +299,7 @@ async def _fetch_jd(page, url: str) -> str:
 async def scrape_nowcoder() -> List[Dict]:
     """按「职位类型 × 城市」逐一抓取牛客网的数据分析岗位。"""
     import main as _main
+    from scrapers.base import BaseScraper
 
     scraper = BaseScraper("牛客网")
     results: List[Dict] = []
