@@ -19,3 +19,4 @@ Thumbs.db
 
 # 其他
 .gitignore
+.worktrees/

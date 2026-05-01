@@ -1,75 +1,56 @@
 """
 数据清洗模块：
-1. 从 JD 文本中提取技术工具和业务关键词
-2. 工作地点标准化（只保留到市级）
-3. 字段空值填充与去重
+1. 工作地点标准化到市级
+2. 提取技术工具和业务关键词
+3. 按原始 ID 和业务键去重
+4. 按杭州优先的规则打分排序
+5. 截断到目标条数并执行质量校验
 """
 
-import re
 import logging
+import re
+from typing import Dict, List, Optional, Tuple
+
 import pandas as pd
-from typing import List, Dict
-from config import TECH_TOOLS, BUSINESS_KEYWORDS
+
+from config import BUSINESS_KEYWORDS, TECH_TOOLS, get_runtime_config
 
 logger = logging.getLogger(__name__)
 
-# 直辖市列表
 _MUNICIPALITIES = {"北京", "上海", "天津", "重庆"}
-
-# 分隔符：用于拆分 "广东-广州"、"上海·浦东" 等
-_CITY_SEP_RE = re.compile(r'[-·•/\\|，,\s]+')
-
-# 匹配 "xx市" 并提取市名
-_CITY_SUFFIX_RE = re.compile(r'^(.{2,})(?:市|州)$')
+_CITY_SEP_RE = re.compile(r"[-·•/\\|，,\s]+")
+_CITY_SUFFIX_RE = re.compile(r"^(.{2,})(?:市|州)$")
+_ROLE_FAMILY_TERMS = ("数据分析", "商业分析", "经营分析", "数据运营", "数据产品分析", "用户研究")
 
 
 def normalize_city(raw_city: str) -> str:
-    """
-    将工作地点标准化为市级名称。
-    例：
-      "北京市朝阳区" → "北京"
-      "广东-广州-天河区" → "广州"
-      "上海·浦东新区" → "上海"
-      "杭州市" → "杭州"
-      "深圳 南山区" → "深圳"
-    """
     if not raw_city:
         return ""
     text = raw_city.strip()
 
-    # 直辖市：只要出现就直接返回
-    for m in _MUNICIPALITIES:
-        if text.startswith(m):
-            return m
+    for municipality in _MUNICIPALITIES:
+        if text.startswith(municipality):
+            return municipality
 
-    # 按分隔符拆分，逐段检查
     parts = _CITY_SEP_RE.split(text)
     for part in parts:
         part = part.strip()
-        if not part:
+        if not part or part.endswith("省"):
             continue
-        # 跳过省份级别（xx省）
-        if part.endswith("省"):
+        if re.search(r"[区县镇乡]$", part) and len(part) <= 5:
             continue
-        # 跳过区/县级
-        if re.search(r'[区县镇乡]$', part) and len(part) <= 5:
-            continue
-        # "xx市" → "xx"
-        m = _CITY_SUFFIX_RE.match(part)
-        if m:
-            return m.group(1)
-        # 短名字且不是省/区，视为城市
+        match = _CITY_SUFFIX_RE.match(part)
+        if match:
+            return match.group(1)
         if 2 <= len(part) <= 4 and not part.endswith("省"):
             return part
 
-    # 兜底：返回去掉"市/区"后缀的首段
     first = parts[0].strip() if parts else text
-    first = re.sub(r'[市区县]+$', '', first)
+    first = re.sub(r"[市区县]+$", "", first)
     return first if first else text
 
 
 def extract_tech_tools(jd_text: str) -> str:
-    """从岗位描述中提取技术工具关键词。"""
     if not jd_text:
         return ""
     found = []
@@ -81,67 +62,116 @@ def extract_tech_tools(jd_text: str) -> str:
 
 
 def extract_business_keywords(jd_text: str) -> str:
-    """从岗位描述中提取业务关键词。"""
     if not jd_text:
         return ""
     found = []
-    for kw in BUSINESS_KEYWORDS:
-        if kw.upper() in jd_text.upper():
-            found.append(kw)
+    for keyword in BUSINESS_KEYWORDS:
+        if keyword.upper() in jd_text.upper():
+            found.append(keyword)
     return ", ".join(dict.fromkeys(found))
 
 
-def clean_data(raw_jobs: List[Dict]) -> pd.DataFrame:
-    """
-    对原始岗位数据进行全面清洗：
-    1. 去除空岗位名/空公司名
-    2. 工作地点标准化到市级
-    3. 提取技术工具和业务关键词
-    4. 填充空值
-    5. 以"公司名+岗位名"去重
-    """
+def _build_business_dedup_key(row: pd.Series) -> str:
+    return "_".join([
+        str(row.get("公司名称", "")).strip(),
+        str(row.get("岗位名称", "")).strip(),
+        str(row.get("工作地点", "")).strip(),
+    ])
+
+
+def _score_row(row: pd.Series) -> int:
+    score = 0
+    title = str(row.get("岗位名称", ""))
+    desc = str(row.get("岗位描述", ""))
+    keyword = str(row.get("抓取关键词", ""))
+
+    if any(term in title for term in _ROLE_FAMILY_TERMS):
+        score += 50
+    elif any(term in desc for term in _ROLE_FAMILY_TERMS):
+        score += 20
+
+    if "实习" in title or "实习" in str(row.get("岗位类型", "")):
+        score += 20
+    if len(desc) >= 80:
+        score += 10
+
+    city = str(row.get("工作地点", ""))
+    if city == "杭州":
+        score += 15
+    elif city == "上海":
+        score += 10
+    elif city == "南京":
+        score += 5
+
+    if "数据分析" in keyword:
+        score += 5
+
+    return score
+
+
+def clean_data(raw_jobs: List[Dict], target_count: Optional[int] = None) -> pd.DataFrame:
+    cfg = get_runtime_config()
+    target_count = target_count or cfg.target_final_count
+
     if not raw_jobs:
         logger.warning("原始数据为空，跳过清洗")
         return pd.DataFrame()
 
     df = pd.DataFrame(raw_jobs)
+    df = df[df["岗位名称"].fillna("").str.strip().astype(bool)]
+    df = df[df["公司名称"].fillna("").str.strip().astype(bool)]
 
-    # 去除岗位名或公司名为空的行
-    df = df[df["岗位名称"].str.strip().astype(bool)]
-    df = df[df["公司名称"].str.strip().astype(bool)]
+    for col in ["薪资", "工作地点", "岗位描述", "岗位类型", "来源平台", "原始ID", "抓取关键词", "抓取城市", "发布时间"]:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("")
 
-    # 填充空值
-    for col in ["薪资", "工作地点", "岗位描述", "岗位类型", "来源平台"]:
-        if col in df.columns:
-            df[col] = df[col].fillna("")
-
-    # 工作地点标准化到市级
     df["工作地点"] = df["工作地点"].apply(normalize_city)
-
-    # 提取技术工具和业务关键词
     df["技术工具"] = df["岗位描述"].apply(extract_tech_tools)
     df["业务关键词"] = df["岗位描述"].apply(extract_business_keywords)
+    df["业务去重键"] = df.apply(_build_business_dedup_key, axis=1)
 
-    # 以"公司名+岗位名"去重
-    dedup_key = df["公司名称"].str.strip() + "_" + df["岗位名称"].str.strip()
-    before = len(df)
-    df = df.loc[~dedup_key.duplicated(keep="first")]
-    after = len(df)
-    if before > after:
-        logger.info(f"数据去重: {before} -> {after} 条（移除 {before - after} 条重复）")
+    if "发布时间" in df.columns:
+        df = df.sort_values(by=["发布时间"], ascending=False)
 
-    # 安全过滤：牛客网实习岗位不应有月薪/年薪格式（如 15K·12薪 / 15-35K·12薪）
-    # 这类记录是因标签点击失效导致全职岗位混入，直接剔除
-    fulltime_mask = (
-        (df["来源平台"] == "牛客网") &
-        (df["岗位类型"] == "实习") &
-        df["薪资"].str.contains(r'\d+K[·\s]', regex=True, na=False, case=False)
-    )
-    removed = fulltime_mask.sum()
-    if removed:
-        logger.info(f"过滤牛客网全职薪资格式记录 {removed} 条（非实习）")
-        df = df[~fulltime_mask]
+    if "原始ID" in df.columns:
+        df = df.drop_duplicates(subset=["原始ID"], keep="first")
+    df = df.drop_duplicates(subset=["业务去重键"], keep="first")
 
-    df = df.reset_index(drop=True)
-    logger.info(f"清洗完成，最终有效数据 {len(df)} 条")
-    return df
+    df["排序分"] = df.apply(_score_row, axis=1)
+    df = df.sort_values(by=["排序分", "发布时间"], ascending=[False, False]).reset_index(drop=True)
+
+    company_counts = {}
+    kept_rows = []
+    for _, row in df.iterrows():
+        company = row["公司名称"]
+        company_counts.setdefault(company, 0)
+        if company_counts[company] >= cfg.company_row_soft_cap:
+            continue
+        company_counts[company] += 1
+        kept_rows.append(row)
+        if len(kept_rows) >= target_count:
+            break
+
+    final_df = pd.DataFrame(kept_rows).reset_index(drop=True)
+    logger.info(f"清洗完成，最终有效数据 {len(final_df)} 条")
+    return final_df
+
+
+def validate_final_dataset(df: pd.DataFrame, source_counts: Dict[str, int]) -> Tuple[bool, List[str]]:
+    cfg = get_runtime_config()
+    reasons: List[str] = []
+
+    if len(df) < cfg.min_valid_result_count:
+        reasons.append(f"最低有效数不足: {len(df)} < {cfg.min_valid_result_count}")
+
+    if source_counts.get("智联招聘", 0) < cfg.min_zhilian_result_count:
+        reasons.append(
+            f"智联结果过低: {source_counts.get('智联招聘', 0)} < {cfg.min_zhilian_result_count}"
+        )
+
+    hangzhou_count = int((df["工作地点"] == "杭州").sum()) if not df.empty else 0
+    if hangzhou_count < cfg.min_hangzhou_result_count:
+        reasons.append(f"杭州结果过低: {hangzhou_count} < {cfg.min_hangzhou_result_count}")
+
+    return len(reasons) == 0, reasons

@@ -6,28 +6,78 @@
 """
 
 import logging
+import json
+from datetime import datetime
 import requests
 import pandas as pd
 from typing import Set
 from config import (
-    FEISHU_APP_ID,
-    FEISHU_APP_SECRET,
-    FEISHU_APP_TOKEN,
-    FEISHU_TABLE_ID,
     FEISHU_BASE_URL,
+    get_runtime_config,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def send_completion_notification(written: int, elapsed_seconds: float) -> bool:
+    """
+    通过飞书应用消息 API 发送任务完成提醒。
+    该通知是附加能力：未配置或发送失败时仅记录日志，不影响主流程结果。
+    """
+    cfg = get_runtime_config().feishu
+    if not cfg.notify_receive_id:
+        logger.info("未配置 FEISHU_NOTIFY_RECEIVE_ID，跳过完成提醒发送")
+        return False
+
+    bitable = FeishuBitable()
+    if not bitable.app_id or not bitable.app_secret:
+        logger.info("飞书应用凭据不完整，跳过完成提醒发送")
+        return False
+    if not bitable.authenticate():
+        logger.error("飞书完成提醒发送前认证失败")
+        return False
+
+    message = (
+        "本次招聘抓取已完成\n"
+        f"写入飞书：{written} 条\n"
+        f"总耗时：{elapsed_seconds:.1f} 秒\n"
+        f"完成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    )
+    payload = {
+        "receive_id": cfg.notify_receive_id,
+        "msg_type": "text",
+        "content": json.dumps({"text": message}, ensure_ascii=False),
+    }
+    url = f"{bitable.base_url}/im/v1/messages?receive_id_type={cfg.notify_receive_id_type}"
+
+    try:
+        resp = requests.post(url, headers=bitable._headers(), json=payload, timeout=10)
+        resp.raise_for_status()
+        try:
+            data = resp.json()
+        except (ValueError, AttributeError):
+            data = {}
+
+        if data.get("code") not in (None, 0):
+            logger.error(f"飞书完成提醒发送失败: {data}")
+            return False
+
+        logger.info("飞书完成提醒发送成功")
+        return True
+    except Exception as exc:
+        logger.error(f"飞书完成提醒发送异常: {exc}")
+        return False
 
 
 class FeishuBitable:
     """飞书多维表格操作封装。"""
 
     def __init__(self):
-        self.app_id = FEISHU_APP_ID
-        self.app_secret = FEISHU_APP_SECRET
-        self.app_token = FEISHU_APP_TOKEN
-        self.table_id = FEISHU_TABLE_ID
+        cfg = get_runtime_config().feishu
+        self.app_id = cfg.app_id
+        self.app_secret = cfg.app_secret
+        self.app_token = cfg.app_token
+        self.table_id = cfg.table_id
         self.base_url = FEISHU_BASE_URL
         self.tenant_token = ""
 
@@ -278,18 +328,22 @@ def sync_to_feishu(df: pd.DataFrame) -> int:
 
     # 检查必要配置
     if not all([bitable.app_id, bitable.app_secret, bitable.app_token, bitable.table_id]):
-        logger.error(
+        message = (
             "飞书配置不完整，请设置环境变量: "
             "FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_APP_TOKEN, FEISHU_TABLE_ID"
         )
-        return 0
+        logger.error(message)
+        raise RuntimeError(message)
 
     # 1. 认证
     if not bitable.authenticate():
-        return 0
+        raise RuntimeError("飞书认证失败，无法继续同步")
 
     # 2. 清空旧记录
     bitable.delete_all_records()
 
     # 3. 全量写入新数据（旧记录已清空，无需去重）
-    return bitable.batch_create_records(df, existing_keys=set())
+    written = bitable.batch_create_records(df, existing_keys=set())
+    if written <= 0:
+        raise RuntimeError("飞书同步未写入任何记录")
+    return written
