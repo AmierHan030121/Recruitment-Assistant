@@ -14,6 +14,8 @@ class FeishuConfig:
     app_secret: Optional[str]
     app_token: Optional[str]
     table_id: Optional[str]
+    notify_receive_id: Optional[str]
+    notify_receive_id_type: str
 
 
 @dataclass(frozen=True)
@@ -100,6 +102,8 @@ def get_runtime_config() -> RuntimeConfig:
             app_secret=os.getenv("FEISHU_APP_SECRET") or None,
             app_token=os.getenv("FEISHU_APP_TOKEN") or None,
             table_id=os.getenv("FEISHU_TABLE_ID") or None,
+            notify_receive_id=os.getenv("FEISHU_NOTIFY_RECEIVE_ID") or None,
+            notify_receive_id_type=os.getenv("FEISHU_NOTIFY_RECEIVE_ID_TYPE") or "user_id",
         ),
         target_final_count=450,
         min_valid_result_count=250,
@@ -142,6 +146,8 @@ FEISHU_APP_ID = runtime_config.feishu.app_id
 FEISHU_APP_SECRET = runtime_config.feishu.app_secret
 FEISHU_APP_TOKEN = runtime_config.feishu.app_token
 FEISHU_TABLE_ID = runtime_config.feishu.table_id
+FEISHU_NOTIFY_RECEIVE_ID = runtime_config.feishu.notify_receive_id
+FEISHU_NOTIFY_RECEIVE_ID_TYPE = runtime_config.feishu.notify_receive_id_type
 
 # 飞书 API 基础地址
 FEISHU_BASE_URL = "https://open.feishu.cn/open-apis"

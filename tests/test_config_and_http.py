@@ -3,13 +3,34 @@ from scrapers.base import build_default_headers, build_session
 
 
 def test_runtime_config_does_not_fall_back_to_hardcoded_feishu(monkeypatch):
-    for key in ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "FEISHU_APP_TOKEN", "FEISHU_TABLE_ID"):
+    for key in (
+        "FEISHU_APP_ID",
+        "FEISHU_APP_SECRET",
+        "FEISHU_APP_TOKEN",
+        "FEISHU_TABLE_ID",
+        "FEISHU_NOTIFY_RECEIVE_ID",
+        "FEISHU_NOTIFY_RECEIVE_ID_TYPE",
+    ):
         monkeypatch.delenv(key, raising=False)
     cfg = get_runtime_config()
     assert cfg.feishu.app_id is None
     assert cfg.feishu.app_secret is None
     assert cfg.feishu.app_token is None
     assert cfg.feishu.table_id is None
+    assert hasattr(cfg.feishu, "notify_receive_id")
+    assert hasattr(cfg.feishu, "notify_receive_id_type")
+    assert cfg.feishu.notify_receive_id is None
+    assert cfg.feishu.notify_receive_id_type == "user_id"
+
+
+def test_runtime_config_reads_notify_target(monkeypatch):
+    monkeypatch.setenv("FEISHU_NOTIFY_RECEIVE_ID", "7369989526749544449")
+    monkeypatch.setenv("FEISHU_NOTIFY_RECEIVE_ID_TYPE", "user_id")
+    cfg = get_runtime_config()
+    assert hasattr(cfg.feishu, "notify_receive_id")
+    assert hasattr(cfg.feishu, "notify_receive_id_type")
+    assert cfg.feishu.notify_receive_id == "7369989526749544449"
+    assert cfg.feishu.notify_receive_id_type == "user_id"
 
 
 def test_runtime_config_contains_hangzhou_first_single_page_plan():

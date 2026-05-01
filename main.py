@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from cleaner import clean_data, validate_final_dataset
 from config import get_runtime_config
+from feishu import send_completion_notification
 from feishu import sync_to_feishu
 from scrapers.nowcoder import scrape_nowcoder
 from scrapers.zhilian import scrape_zhilian
@@ -114,6 +115,10 @@ async def main(platforms: list = None, dry_run: bool = False):
         logger.info("===== 开始同步至飞书多维表格 =====")
         written = sync_to_feishu(final_df)
         logger.info(f"飞书同步完成，写入 {written} 条记录")
+        send_completion_notification(
+            written=written,
+            elapsed_seconds=(datetime.now() - start_time).total_seconds(),
+        )
 
     elapsed = (datetime.now() - start_time).total_seconds()
     logger.info(f"========== 流程结束，耗时 {elapsed:.1f} 秒 ==========")
