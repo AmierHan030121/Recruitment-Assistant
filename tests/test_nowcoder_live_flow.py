@@ -6,6 +6,7 @@ def test_build_nowcoder_queries_starts_with_hangzhou_queries():
     queries = build_nowcoder_queries()
     assert queries[0]["city"] == "杭州"
     assert "杭州" in queries[0]["query"]
+    assert any(query["query"] == "数据治理 实习 杭州" for query in queries)
 
 
 def test_collect_nowcoder_jobs_fetches_detail_for_matching_cards_only():

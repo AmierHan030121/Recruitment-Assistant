@@ -15,7 +15,19 @@ from scrapers.base import build_session, request_text
 
 logger = logging.getLogger(__name__)
 
-ROLE_FAMILY_TERMS = ("数据分析", "商业分析", "经营分析", "数据运营", "数据产品分析", "用户研究")
+ROLE_FAMILY_TERMS = (
+    "数据分析",
+    "商业分析",
+    "经营分析",
+    "数据运营",
+    "数据产品分析",
+    "用户研究",
+    "数据治理",
+    "市场分析",
+    "行业研究",
+    "商业数据分析",
+    "产品运营",
+)
 
 
 def parse_nowcoder_search_results(html: str, target_city: str, keyword: str) -> list[dict]:

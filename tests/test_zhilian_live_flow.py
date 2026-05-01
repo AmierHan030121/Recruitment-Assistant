@@ -5,8 +5,10 @@ from scrapers.zhilian import build_zhilian_page_queue, collect_zhilian_jobs
 def test_build_zhilian_page_queue_prioritizes_hangzhou_first():
     queue = build_zhilian_page_queue()
     assert queue[0]["city"] == "杭州"
-    assert queue[0]["keyword"] == "数据分析"
+    assert queue[0]["keyword"] == "数据运营"
     assert queue[1]["city"] == "杭州"
+    assert all(item["max_pages"] == 1 for item in queue)
+    assert any(item["city"] == "杭州" and item["keyword"] == "产品运营" for item in queue)
 
 
 def test_collect_zhilian_jobs_deduplicates_on_original_id():

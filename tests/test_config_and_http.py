@@ -12,12 +12,14 @@ def test_runtime_config_does_not_fall_back_to_hardcoded_feishu(monkeypatch):
     assert cfg.feishu.table_id is None
 
 
-def test_runtime_config_contains_hangzhou_first_page_plan():
+def test_runtime_config_contains_hangzhou_first_single_page_plan():
     cfg = get_runtime_config()
     first = cfg.zhilian_page_plan[0]
     assert first["city"] == "杭州"
-    assert first["keyword"] == "数据分析"
-    assert first["max_pages"] == 4
+    assert first["keyword"] == "数据运营"
+    assert first["max_pages"] == 1
+    assert all(item["max_pages"] == 1 for item in cfg.zhilian_page_plan)
+    assert any(item["city"] == "杭州" and item["keyword"] == "数据治理" for item in cfg.zhilian_page_plan)
 
 
 def test_http_session_has_browser_like_headers():

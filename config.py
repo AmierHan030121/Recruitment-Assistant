@@ -33,6 +33,46 @@ class RuntimeConfig:
 
 
 def get_runtime_config() -> RuntimeConfig:
+    target_cities_priority = ["杭州", "上海", "南京"]
+    zhilian_city_codes = {"杭州": "653", "上海": "538", "南京": "635"}
+    zhilian_keywords_by_city = {
+        # 广度优先：已验证登录态/未登录态下 page1 能稳定出结果的词优先，避免浪费在空的第 2+ 页。
+        "杭州": [
+            "数据运营",
+            "产品运营",
+            "数据分析",
+            "数据治理",
+            "行业研究",
+            "市场分析",
+            "用户研究",
+            "商业分析",
+            "商业数据分析",
+        ],
+        "上海": [
+            "数据运营",
+            "数据分析",
+            "数据治理",
+            "市场分析",
+            "行业研究",
+            "产品运营",
+            "商业分析",
+            "用户研究",
+        ],
+        "南京": [
+            "数据运营",
+            "数据治理",
+            "数据分析",
+            "市场分析",
+            "产品运营",
+            "商业分析",
+        ],
+    }
+    nowcoder_keywords_by_city = {
+        "杭州": ["数据分析", "数据运营", "数据治理", "市场分析", "行业研究", "产品运营"],
+        "上海": ["数据分析", "数据运营", "数据治理", "市场分析", "行业研究"],
+        "南京": ["数据运营", "数据治理", "数据分析", "市场分析"],
+    }
+
     return RuntimeConfig(
         feishu=FeishuConfig(
             app_id=os.getenv("FEISHU_APP_ID") or None,
@@ -47,40 +87,20 @@ def get_runtime_config() -> RuntimeConfig:
         company_row_soft_cap=15,
         request_timeout=15,
         max_retries=3,
-        target_cities_priority=["杭州", "上海", "南京"],
+        target_cities_priority=target_cities_priority,
         keyword_groups={
-            "core": ["数据分析", "商业分析", "经营分析", "数据运营", "数据产品分析", "用户研究"],
-            "supplemental": ["增长分析", "策略分析", "用户分析", "商业数据分析"],
+            "core": ["数据运营", "数据分析", "数据治理", "市场分析", "行业研究", "商业分析", "用户研究"],
+            "supplemental": ["商业数据分析", "产品运营"],
         },
         zhilian_page_plan=[
-            {"city": "杭州", "city_code": "653", "keyword": "数据分析", "max_pages": 4},
-            {"city": "杭州", "city_code": "653", "keyword": "数据运营", "max_pages": 3},
-            {"city": "杭州", "city_code": "653", "keyword": "商业分析", "max_pages": 2},
-            {"city": "杭州", "city_code": "653", "keyword": "经营分析", "max_pages": 2},
-            {"city": "杭州", "city_code": "653", "keyword": "数据产品分析", "max_pages": 2},
-            {"city": "杭州", "city_code": "653", "keyword": "用户研究", "max_pages": 2},
-            {"city": "上海", "city_code": "538", "keyword": "数据分析", "max_pages": 3},
-            {"city": "上海", "city_code": "538", "keyword": "数据运营", "max_pages": 2},
-            {"city": "上海", "city_code": "538", "keyword": "商业分析", "max_pages": 1},
-            {"city": "上海", "city_code": "538", "keyword": "经营分析", "max_pages": 1},
-            {"city": "上海", "city_code": "538", "keyword": "数据产品分析", "max_pages": 1},
-            {"city": "上海", "city_code": "538", "keyword": "用户研究", "max_pages": 1},
-            {"city": "南京", "city_code": "635", "keyword": "数据分析", "max_pages": 2},
-            {"city": "南京", "city_code": "635", "keyword": "数据运营", "max_pages": 1},
-            {"city": "南京", "city_code": "635", "keyword": "商业分析", "max_pages": 1},
-            {"city": "南京", "city_code": "635", "keyword": "经营分析", "max_pages": 1},
-            {"city": "南京", "city_code": "635", "keyword": "数据产品分析", "max_pages": 1},
-            {"city": "南京", "city_code": "635", "keyword": "用户研究", "max_pages": 1},
+            {"city": city, "city_code": zhilian_city_codes[city], "keyword": keyword, "max_pages": 1}
+            for city in target_cities_priority
+            for keyword in zhilian_keywords_by_city[city]
         ],
         nowcoder_query_plan=[
-            {"city": "杭州", "query": "数据分析 实习 杭州"},
-            {"city": "杭州", "query": "商业分析 实习 杭州"},
-            {"city": "杭州", "query": "经营分析 实习 杭州"},
-            {"city": "杭州", "query": "数据运营 实习 杭州"},
-            {"city": "上海", "query": "数据运营 实习 上海"},
-            {"city": "上海", "query": "数据分析 实习 上海"},
-            {"city": "南京", "query": "数据分析 实习 南京"},
-            {"city": "南京", "query": "商业分析 实习 南京"},
+            {"city": city, "query": f"{keyword} 实习 {city}"}
+            for city in target_cities_priority
+            for keyword in nowcoder_keywords_by_city[city]
         ],
     )
 
