@@ -21,6 +21,10 @@ def test_runtime_config_contains_hangzhou_first_single_page_plan():
     assert all(item["max_pages"] == 1 for item in cfg.zhilian_page_plan)
     assert any(item["city"] == "杭州" and item["keyword"] == "数据治理" for item in cfg.zhilian_page_plan)
     assert any(item["city"] == "杭州" and item["keyword"] == "运营分析" for item in cfg.zhilian_page_plan)
+    assert any(item["city"] == "杭州" and item["keyword"] == "市场运营" for item in cfg.zhilian_page_plan)
+    assert any(item["city"] == "杭州" and item["keyword"] == "内容运营" for item in cfg.zhilian_page_plan)
+    assert any(item["city"] == "上海" and item["keyword"] == "活动运营" for item in cfg.zhilian_page_plan)
+    assert any(item["city"] == "南京" and item["keyword"] == "电商运营" for item in cfg.zhilian_page_plan)
 
 
 def test_http_session_has_browser_like_headers():

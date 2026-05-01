@@ -36,7 +36,8 @@ def get_runtime_config() -> RuntimeConfig:
     target_cities_priority = ["杭州", "上海", "南京"]
     zhilian_city_codes = {"杭州": "653", "上海": "538", "南京": "635"}
     zhilian_keywords_by_city = {
-        # 广度优先：已验证登录态/未登录态下 page1 能稳定出结果的词优先，避免浪费在空的第 2+ 页。
+        # 广度优先：只保留已验证 page1 有真实职位卡片的词，避免浪费在
+        # positionCount 看起来很多、但首屏实际为空的查询上。
         "杭州": [
             "数据运营",
             "产品运营",
@@ -51,6 +52,10 @@ def get_runtime_config() -> RuntimeConfig:
             "用户研究",
             "商业分析",
             "商业数据分析",
+            "市场运营",
+            "内容运营",
+            "活动运营",
+            "电商运营",
         ],
         "上海": [
             "数据运营",
@@ -65,6 +70,10 @@ def get_runtime_config() -> RuntimeConfig:
             "商业运营",
             "商业分析",
             "用户研究",
+            "市场运营",
+            "内容运营",
+            "活动运营",
+            "电商运营",
         ],
         "南京": [
             "数据运营",
@@ -73,6 +82,10 @@ def get_runtime_config() -> RuntimeConfig:
             "市场分析",
             "产品运营",
             "商业分析",
+            "市场运营",
+            "内容运营",
+            "活动运营",
+            "电商运营",
         ],
     }
     nowcoder_keywords_by_city = {
@@ -98,7 +111,17 @@ def get_runtime_config() -> RuntimeConfig:
         target_cities_priority=target_cities_priority,
         keyword_groups={
             "core": ["数据运营", "用户运营", "运营分析", "数据分析", "数据治理", "市场分析", "市场研究", "行业研究"],
-            "supplemental": ["商业分析", "商业运营", "商业数据分析", "产品运营", "用户研究"],
+            "supplemental": [
+                "商业分析",
+                "商业运营",
+                "商业数据分析",
+                "产品运营",
+                "用户研究",
+                "市场运营",
+                "内容运营",
+                "活动运营",
+                "电商运营",
+            ],
         },
         zhilian_page_plan=[
             {"city": city, "city_code": zhilian_city_codes[city], "keyword": keyword, "max_pages": 1}
