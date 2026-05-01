@@ -276,18 +276,22 @@ def sync_to_feishu(df: pd.DataFrame) -> int:
 
     # 检查必要配置
     if not all([bitable.app_id, bitable.app_secret, bitable.app_token, bitable.table_id]):
-        logger.error(
+        message = (
             "飞书配置不完整，请设置环境变量: "
             "FEISHU_APP_ID, FEISHU_APP_SECRET, FEISHU_APP_TOKEN, FEISHU_TABLE_ID"
         )
-        return 0
+        logger.error(message)
+        raise RuntimeError(message)
 
     # 1. 认证
     if not bitable.authenticate():
-        return 0
+        raise RuntimeError("飞书认证失败，无法继续同步")
 
     # 2. 清空旧记录
     bitable.delete_all_records()
 
     # 3. 全量写入新数据（旧记录已清空，无需去重）
-    return bitable.batch_create_records(df, existing_keys=set())
+    written = bitable.batch_create_records(df, existing_keys=set())
+    if written <= 0:
+        raise RuntimeError("飞书同步未写入任何记录")
+    return written
