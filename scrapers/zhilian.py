@@ -312,7 +312,6 @@ def collect_zhilian_jobs(
                                 city_name=item["city"],
                                 keyword=item["keyword"],
                             )
-                            page_count = int(state.get("pages", 1) or 1)
                         except ValueError as browser_exc:
                             logger.warning(
                                 f"[智联招聘] 浏览器页仍缺少嵌入状态，回退 HTML 卡片解析: "
