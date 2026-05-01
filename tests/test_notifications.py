@@ -88,8 +88,13 @@ def test_main_sends_completion_notification_after_feishu_sync(monkeypatch, tmp_p
         events.append(("notify", written, elapsed_seconds))
         return True
 
+    def fake_save_run_summary(summary, output_dir=None):
+        events.append(("summary", summary, output_dir))
+        return tmp_path / "run_summary.json"
+
     monkeypatch.setattr(main, "sync_to_feishu", fake_sync)
     monkeypatch.setattr(main, "send_completion_notification", fake_notify, raising=False)
+    monkeypatch.setattr(main, "save_run_summary", fake_save_run_summary, raising=False)
 
     asyncio.run(main.main(platforms=["placeholder"], dry_run=False))
 
@@ -97,3 +102,6 @@ def test_main_sends_completion_notification_after_feishu_sync(monkeypatch, tmp_p
     assert events[1][0] == "notify"
     assert events[1][1] == 42
     assert events[1][2] >= 0
+    assert events[2][0] == "summary"
+    assert events[2][1]["written_count"] == 42
+    assert events[2][1]["notification_sent"] is True

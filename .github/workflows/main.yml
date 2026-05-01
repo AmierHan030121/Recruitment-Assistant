@@ -46,10 +46,13 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Run scraper
         run: python main.py
+      - name: Publish workflow summary
+        if: always()
+        run: python scripts/write_github_summary.py
       - name: Upload outputs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: job-data-${{ github.run_number }}
-          path: output/*.csv
+          path: output/*
           retention-days: 7

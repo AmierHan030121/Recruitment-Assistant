@@ -4,6 +4,7 @@
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -61,6 +62,19 @@ def save_output_files(raw_jobs: list[dict], final_df: pd.DataFrame, output_dir: 
     return {"raw": raw_path, "final": final_path}
 
 
+def save_run_summary(summary: dict, output_dir: Optional[Path] = None) -> Path:
+    output_dir = output_dir or Path(__file__).resolve().parent / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    label = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary_path = output_dir / f"run_summary_{label}.json"
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return summary_path
+
+
 async def run_scraper(name: str, scrape_func) -> list:
     try:
         logger.info(f"===== 开始抓取 [{name}] =====")
@@ -104,6 +118,8 @@ async def main(platforms: list = None, dry_run: bool = False):
     logger.info(f"最终数据已保存到 {output_paths['final']}")
 
     quality_ok, reasons = validate_final_dataset(final_df, source_counts)
+    written = 0
+    notification_sent = False
 
     if dry_run:
         logger.info("[DRY RUN] 跳过飞书同步")
@@ -115,12 +131,30 @@ async def main(platforms: list = None, dry_run: bool = False):
         logger.info("===== 开始同步至飞书多维表格 =====")
         written = sync_to_feishu(final_df)
         logger.info(f"飞书同步完成，写入 {written} 条记录")
-        send_completion_notification(
+        notification_sent = send_completion_notification(
             written=written,
             elapsed_seconds=(datetime.now() - start_time).total_seconds(),
         )
 
     elapsed = (datetime.now() - start_time).total_seconds()
+    summary_path = save_run_summary(
+        {
+            "started_at": start_time.isoformat(),
+            "completed_at": datetime.now().isoformat(),
+            "platforms": list(platforms),
+            "dry_run": dry_run,
+            "raw_count": len(all_jobs),
+            "final_count": len(final_df),
+            "written_count": written,
+            "notification_sent": notification_sent,
+            "quality_ok": quality_ok,
+            "quality_reasons": reasons,
+            "source_counts": source_counts,
+            "elapsed_seconds": round(elapsed, 1),
+            "output_files": {key: str(path) for key, path in output_paths.items()},
+        }
+    )
+    logger.info(f"运行摘要已保存到 {summary_path}")
     logger.info(f"========== 流程结束，耗时 {elapsed:.1f} 秒 ==========")
 
 
