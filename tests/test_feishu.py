@@ -13,9 +13,9 @@ def test_feishu_config_requires_environment_values(monkeypatch):
     assert bitable.table_id is None
 
 
-def test_ci_files_no_longer_reference_playwright_runtime():
+def test_ci_files_install_playwright_runtime_for_zhilian_fallback():
     requirements = Path("requirements.txt").read_text(encoding="utf-8")
     workflow = Path(".github/workflows/main.yml").read_text(encoding="utf-8")
-    assert "playwright" not in requirements.lower()
-    assert "install playwright" not in workflow.lower()
-    assert "ms-playwright" not in workflow.lower()
+    assert "playwright>=" in requirements.lower()
+    assert "python -m playwright install --with-deps chromium" in workflow.lower()
+    assert "ms-playwright" in workflow.lower()

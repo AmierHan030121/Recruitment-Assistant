@@ -33,3 +33,26 @@ def test_collect_zhilian_jobs_falls_back_to_html_cards_when_state_missing():
     assert len(jobs) == 2
     assert jobs[0]["公司名称"] == "浙江汇信科技有限公司"
     assert jobs[1]["原始ID"] == "CC121031870J40793527507"
+
+
+def test_collect_zhilian_jobs_uses_browser_fallback_on_security_verification_page():
+    blocked_html = read_fixture("zhilian", "security_verification_page.html")
+    browser_html = read_fixture("zhilian", "search_page.html")
+    browser_calls = []
+
+    def fake_fetch(_session, _url, **_kwargs):
+        return blocked_html
+
+    def fake_browser_fetch(_session, url, **_kwargs):
+        browser_calls.append(url)
+        return browser_html
+
+    jobs = collect_zhilian_jobs(
+        fetch_html=fake_fetch,
+        fetch_browser_html=fake_browser_fetch,
+        target_pool=1,
+    )
+
+    assert len(jobs) == 1
+    assert jobs[0]["原始ID"] == "CC841423530J40895236315"
+    assert browser_calls
